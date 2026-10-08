@@ -15,7 +15,10 @@
 <body>
 <header>
   <div class="logo">Home <b>Studio</b></div>
-  <div id="status" class="chip"><i></i><span>Not connected</span></div>
+  <div class="chips">
+    <div id="presence" class="chip" hidden><i></i><span></span></div>
+    <div id="status" class="chip"><i></i><span>Not connected</span></div>
+  </div>
 </header>
 <main>
   <section class="stage">
@@ -31,7 +34,7 @@
       <input id="file" type="file" accept="video/*,.mkv" hidden>
       <label class="btn" for="subs">Add subtitles</label>
       <input id="subs" type="file" accept=".srt,.vtt" hidden>
-      <button id="start" class="btn blue">Start together</button>
+      <button id="start" class="btn blue" disabled>Start together</button>
       <button id="resync" class="btn" title="Jump to where your partner is">Resync</button>
       <button id="fs" class="btn">Fullscreen</button>
       <div class="offset" title="Shift your timeline if your copy has a different intro">
@@ -68,9 +71,13 @@
       </div>
     </div>
     <div class="card chat">
-      <h2>Chat</h2>
-      <div id="msgs"></div>
-      <form id="chatf"><input id="chatin" placeholder="Say something" autocomplete="off"><button class="btn">Send</button></form>
+      <button id="chattoggle" class="head" aria-expanded="true" aria-controls="chatbody">
+        <span class="ttl">Chat</span><span id="unread" hidden>0</span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div id="chatbody">
+        <div id="msgs"></div>
+        <form id="chatf"><input id="chatin" placeholder="Say something" autocomplete="off"><button class="btn">Send</button></form>
+      </div>
     </div>
   </aside>
 </main>
