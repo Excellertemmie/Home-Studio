@@ -4,29 +4,11 @@
 // Relay (TURN) for people on different networks/states. Sign up free at metered.ca, then paste your TURN entries here, e.g.
 // const TURN = [{urls:'turn:relay.metered.ca:80',username:'YOUR_USER',credential:'YOUR_PASS'},{urls:'turn:relay.metered.ca:443?transport=tcp',username:'YOUR_USER',credential:'YOUR_PASS'}];
 const TURN = [
-  {
-    urls: "stun:stun.relay.metered.ca:80",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:80",
-    username: "f7b4673fb38fefb4b1158a44",
-    credential: "UpbpZmtI0XPyi2Pd",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:80?transport=tcp",
-    username: "f7b4673fb38fefb4b1158a44",
-    credential: "UpbpZmtI0XPyi2Pd",
-  },
-  {
-    urls: "turn:global.relay.metered.ca:443",
-    username: "f7b4673fb38fefb4b1158a44",
-    credential: "UpbpZmtI0XPyi2Pd",
-  },
-  {
-    urls: "turns:global.relay.metered.ca:443?transport=tcp",
-    username: "f7b4673fb38fefb4b1158a44",
-    credential: "UpbpZmtI0XPyi2Pd",
-  }
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:global.relay.metered.ca:80', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
+  { urls: 'turn:global.relay.metered.ca:443', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' }
 ];
 const PEER_OPTS = TURN.length ? { config: { iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -37,12 +19,16 @@ const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
 let key = '', fileName = '', partner = null, retry, left = false;
 
-const send = o => { if (conn && conn.open) conn.send(o); };
+let priming = false, reqT;
+const quiet = () => lock || priming;
+const note = (d, t) => { $('#log').textContent = 'Last sync message: ' + d + ' ' + t; };
+const send = o => { if (conn && conn.open) { conn.send(o); if (o.t !== 'beat') note('sent', o.t); } };
 const pos = () => v.currentTime - off;
 const status = (t, s) => { $('#status span').textContent = t; $('#status').dataset.s = s || ''; };
 const banner = t => { const b = $('#banner'); b.textContent = t || ''; b.hidden = !t; };
 const apply = f => { lock = true; try { f(); } catch (e) {} clearTimeout(lt); lt = setTimeout(() => lock = false, 600); };
-const play = () => v.play().catch(() => banner('Tap play. Your browser blocked autoplay.'));
+const play = () => v.play().catch(() => { $('#tap').hidden = false; });
+$('#tap').onclick = () => { $('#tap').hidden = true; v.play(); };
 
 /* ---------- connection ---------- */
 function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; }
@@ -100,25 +86,34 @@ const beat = f => ({ t: 'beat', p: pos(), pl: !v.paused, f });
 const MEDIA = ['play', 'pause', 'seek', 'beat', 'wait', 'ready', 'req'];
 function onData(m) {
   const t = m.t, tgt = (m.p || 0) + off;
+  if (t !== 'beat') note('received', t);
   if (MEDIA.includes(t) && !v.src) return;
   if (t === 'hello') { partner = m; info(); }
   else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
   else if (t === 'pause') apply(() => { v.pause(); v.currentTime = tgt; });
   else if (t === 'seek') apply(() => { v.currentTime = tgt; });
-  else if (t === 'beat') { if (m.f || !host) apply(() => {
-    if (Math.abs(v.currentTime - tgt) > (m.f ? .3 : 1.5)) v.currentTime = tgt;
-    if (m.pl && v.paused) play(); if (!m.pl && !v.paused) v.pause(); }); }
+  else if (t === 'beat') {
+    if (m.f) {
+      clearTimeout(reqT);
+      apply(() => { v.currentTime = tgt; if (m.pl && v.paused) play(); if (!m.pl && !v.paused) v.pause(); });
+      banner('Synced to your partner.'); setTimeout(() => { if ($('#banner').textContent === 'Synced to your partner.') banner(''); }, 2000);
+    } else if (!host && m.pl && !v.paused && Math.abs(v.currentTime - tgt) > 1.5) apply(() => { v.currentTime = tgt; });
+  }
   else if (t === 'req') send(beat(true));
   else if (t === 'wait') { resume = resume || !v.paused; apply(() => v.pause()); banner('Waiting for your partner…'); }
   else if (t === 'ready') { banner(''); if (resume && !selfWait) apply(play); resume = false; }
   else if (t === 'count') count();
   else if (t === 'chat') chat(m.x, false);
 }
-v.addEventListener('play', () => { if (!lock) send({ t: 'play', p: pos() }); });
-v.addEventListener('pause', () => { if (!lock && !v.ended) send({ t: 'pause', p: pos() }); });
-v.addEventListener('seeked', () => { if (!lock) send({ t: 'seek', p: pos() }); });
-v.addEventListener('waiting', () => { if (!lock && v.src) { selfWait = true; send({ t: 'wait' }); } });
-v.addEventListener('playing', () => { if (selfWait) { selfWait = false; send({ t: 'ready' }); } });
+v.addEventListener('play', () => { if (!quiet()) send({ t: 'play', p: pos() }); });
+v.addEventListener('pause', () => { if (!quiet() && !v.ended) send({ t: 'pause', p: pos() }); });
+v.addEventListener('seeked', () => { if (!quiet()) send({ t: 'seek', p: pos() }); });
+let waitT;
+v.addEventListener('waiting', () => {
+  if (quiet() || !v.src) return; clearTimeout(waitT);
+  waitT = setTimeout(() => { if (v.readyState < 3 && !v.paused) { selfWait = true; send({ t: 'wait' }); } }, 1500);
+});
+v.addEventListener('playing', () => { clearTimeout(waitT); if (selfWait) { selfWait = false; send({ t: 'ready' }); } });
 setInterval(() => { if (host && v.src && !selfWait) send(beat(false)); }, 2000);
 
 /* ---------- file, subtitles, info ---------- */
@@ -126,6 +121,9 @@ $('#file').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   fileName = f.name; key = 'hs:' + f.name + f.size;
   v.src = URL.createObjectURL(f); $('#empty').hidden = true; banner('');
+  // Brief muted play/pause during this tap so phones allow your partner's play command later
+  priming = true; v.muted = true;
+  v.play().then(() => apply(() => v.pause())).catch(() => {}).finally(() => { v.muted = false; priming = false; });
 };
 v.onloadedmetadata = () => {
   let s = 0; try { s = +localStorage.getItem(key); } catch (e) {}
@@ -165,7 +163,17 @@ function count() {
   }, 1000);
 }
 $('#start').onclick = () => { if (!conn || !conn.open) return banner('Connect to your partner first.'); send({ t: 'count' }); count(); };
-$('#resync').onclick = () => send({ t: 'req' });
+$('#resync').onclick = () => {
+  if (!conn || !conn.open) return banner('Connect to your partner first.');
+  send({ t: 'req' }); clearTimeout(reqT);
+  reqT = setTimeout(() => banner('No reply from your partner. Check they have the movie loaded.'), 3000);
+};
+$('#fs').onclick = () => {
+  const s = $('.screen');
+  if (s.requestFullscreen) s.requestFullscreen();
+  else if (s.webkitRequestFullscreen) s.webkitRequestFullscreen();
+  else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+};
 document.querySelectorAll('[data-o]').forEach(b => b.onclick = () => {
   off += +b.dataset.o; $('#off').textContent = (off > 0 ? '+' : '') + off + 's'; send({ t: 'req' });
 });
