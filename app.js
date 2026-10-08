@@ -1,0 +1,163 @@
+// Home Studio: syncs play/pause/seek between two browsers. Video files never leave your device.
+// Signaling: PeerJS free public server. To use your own, set PEER_OPTS = {host:'your-host',port:443,secure:true,path:'/'}
+// For strict networks add a TURN server: PEER_OPTS = {config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'turn:YOUR_TURN',username:'u',credential:'p'}]}}
+const PEER_OPTS = {};
+const $ = s => document.querySelector(s), v = $('#video');
+const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
+let key = '', fileName = '', partner = null, retry, left = false;
+
+const send = o => { if (conn && conn.open) conn.send(o); };
+const pos = () => v.currentTime - off;
+const status = (t, s) => { $('#status span').textContent = t; $('#status').dataset.s = s || ''; };
+const banner = t => { const b = $('#banner'); b.textContent = t || ''; b.hidden = !t; };
+const apply = f => { lock = true; try { f(); } catch (e) {} clearTimeout(lt); lt = setTimeout(() => lock = false, 600); };
+const play = () => v.play().catch(() => banner('Tap play. Your browser blocked autoplay.'));
+
+/* ---------- connection ---------- */
+function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; }
+function create() {
+  code = Array.from({ length: 6 }, () => AL[Math.random() * AL.length | 0]).join('');
+  host = true; left = false;
+  peer = new Peer(PRE + code, PEER_OPTS); bindPeer();
+  peer.on('connection', c => { if (conn && conn.open) try { conn.close(); } catch (e) {} setup(c); });
+}
+function join(c) {
+  code = c.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 6) return banner('Enter the 6-character room code.');
+  host = false; left = false; showRoom(); status('Connecting…', 'wait');
+  peer = new Peer(PEER_OPTS); bindPeer(); peer.on('open', dial);
+}
+function bindPeer() {
+  peer.on('open', () => { if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
+  peer.on('disconnected', () => { if (!left) peer.reconnect(); });
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id' && host) { peer.destroy(); return create(); }
+    if (e.type === 'peer-unavailable') { banner('Room not found yet. Retrying…'); return schedule(); }
+    banner('Connection problem (' + e.type + '). Retrying…'); schedule();
+  });
+}
+function dial() { if (left || host || (conn && conn.open) || !peer || peer.destroyed) return; setup(peer.connect(PRE + code, { reliable: true })); }
+function schedule() { clearTimeout(retry); if (!host && !left) retry = setTimeout(dial, 3000); }
+function setup(c) {
+  conn = c;
+  c.on('open', () => { clearTimeout(retry); banner(''); status('Connected', 'ok'); hello(); });
+  c.on('data', onData);
+  const gone = () => {
+    if (conn !== c || left) return;
+    status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
+    banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
+    partner = null; info(); schedule();
+  };
+  c.on('close', gone); c.on('error', gone);
+}
+function leave() {
+  left = true; clearTimeout(retry);
+  try { conn && conn.close(); peer && peer.destroy(); } catch (e) {}
+  conn = peer = null; partner = null; history.replaceState(null, '', location.pathname);
+  $('#room').hidden = true; $('#lobby').hidden = false; banner(''); status('Not connected'); info();
+}
+
+/* ---------- messages ---------- */
+const hello = () => send({ t: 'hello', dur: v.duration || 0, name: v.src ? fileName : '' });
+const beat = f => ({ t: 'beat', p: pos(), pl: !v.paused, f });
+const MEDIA = ['play', 'pause', 'seek', 'beat', 'wait', 'ready', 'req'];
+function onData(m) {
+  const t = m.t, tgt = (m.p || 0) + off;
+  if (MEDIA.includes(t) && !v.src) return;
+  if (t === 'hello') { partner = m; info(); }
+  else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
+  else if (t === 'pause') apply(() => { v.pause(); v.currentTime = tgt; });
+  else if (t === 'seek') apply(() => { v.currentTime = tgt; });
+  else if (t === 'beat') { if (m.f || !host) apply(() => {
+    if (Math.abs(v.currentTime - tgt) > (m.f ? .3 : 1.5)) v.currentTime = tgt;
+    if (m.pl && v.paused) play(); if (!m.pl && !v.paused) v.pause(); }); }
+  else if (t === 'req') send(beat(true));
+  else if (t === 'wait') { resume = resume || !v.paused; apply(() => v.pause()); banner('Waiting for your partner…'); }
+  else if (t === 'ready') { banner(''); if (resume && !selfWait) apply(play); resume = false; }
+  else if (t === 'count') count();
+  else if (t === 'chat') chat(m.x, false);
+}
+v.addEventListener('play', () => { if (!lock) send({ t: 'play', p: pos() }); });
+v.addEventListener('pause', () => { if (!lock && !v.ended) send({ t: 'pause', p: pos() }); });
+v.addEventListener('seeked', () => { if (!lock) send({ t: 'seek', p: pos() }); });
+v.addEventListener('waiting', () => { if (!lock && v.src) { selfWait = true; send({ t: 'wait' }); } });
+v.addEventListener('playing', () => { if (selfWait) { selfWait = false; send({ t: 'ready' }); } });
+setInterval(() => { if (host && v.src && !selfWait) send(beat(false)); }, 2000);
+
+/* ---------- file, subtitles, info ---------- */
+$('#file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  fileName = f.name; key = 'hs:' + f.name + f.size;
+  v.src = URL.createObjectURL(f); $('#empty').hidden = true; banner('');
+};
+v.onloadedmetadata = () => {
+  let s = 0; try { s = +localStorage.getItem(key); } catch (e) {}
+  if (s > 5 && s < v.duration - 10) apply(() => { v.currentTime = s; });
+  hello(); info();
+};
+v.onerror = () => { if (v.src) banner("This browser can't play that file. Try an .mp4 (H.264/AAC) copy. .mkv often won't play."); };
+setInterval(() => { if (key && !v.paused) try { localStorage.setItem(key, v.currentTime); } catch (e) {} }, 5000);
+function info() {
+  const el = $('#fileinfo'); el.className = '';
+  if (!conn || !conn.open) { el.textContent = v.src ? 'Loaded: ' + fileName : ''; return; }
+  if (!partner || !partner.name) { el.textContent = "Waiting for your partner to choose their movie file."; return; }
+  if (v.duration && partner.dur && Math.abs(v.duration - partner.dur) > 1.5) {
+    el.className = 'warn';
+    el.textContent = 'Your files differ in length by ' + Math.abs(v.duration - partner.dur).toFixed(1) + 's. They may be different cuts. Use Offset to line them up.';
+  } else el.textContent = 'Both movies loaded. Partner has: ' + partner.name;
+}
+$('#subs').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  let x = await f.text();
+  if (!/^\s*WEBVTT/.test(x)) x = 'WEBVTT\n\n' + x.replace(/\r/g, '').replace(/(\d\d:\d\d:\d\d),(\d{3})/g, '$1.$2');
+  v.querySelectorAll('track').forEach(t => t.remove());
+  const t = document.createElement('track');
+  t.kind = 'subtitles'; t.label = 'Subtitles'; t.default = true;
+  t.src = URL.createObjectURL(new Blob([x], { type: 'text/vtt' }));
+  v.append(t); setTimeout(() => { if (v.textTracks[0]) v.textTracks[0].mode = 'showing'; }, 150);
+};
+
+/* ---------- controls ---------- */
+function count() {
+  if (!v.src) return banner('Choose your movie first.');
+  let n = 3; apply(() => v.pause());
+  const o = $('#overlay'); o.hidden = false; o.textContent = n;
+  const i = setInterval(() => {
+    n--; if (n > 0) o.textContent = n;
+    else { clearInterval(i); o.hidden = true; apply(play); }
+  }, 1000);
+}
+$('#start').onclick = () => { if (!conn || !conn.open) return banner('Connect to your partner first.'); send({ t: 'count' }); count(); };
+$('#resync').onclick = () => send({ t: 'req' });
+document.querySelectorAll('[data-o]').forEach(b => b.onclick = () => {
+  off += +b.dataset.o; $('#off').textContent = (off > 0 ? '+' : '') + off + 's'; send({ t: 'req' });
+});
+addEventListener('keydown', e => {
+  if (/INPUT|TEXTAREA|VIDEO|BUTTON/.test(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k === ' ') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+  else if (k === 'arrowright') v.currentTime += 10;
+  else if (k === 'arrowleft') v.currentTime -= 10;
+  else if (k === 'f') document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen && v.requestFullscreen();
+  else if (k === 'm') v.muted = !v.muted;
+});
+
+/* ---------- lobby + chat ---------- */
+$('#create').onclick = create;
+$('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
+$('#leave').onclick = leave;
+const flash = (b, t) => { const o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1500); };
+$('#copycode').onclick = e => { navigator.clipboard.writeText(code); flash(e.target, 'Copied'); };
+$('#copylink').onclick = e => { navigator.clipboard.writeText(location.origin + location.pathname + '#' + code); flash(e.target, 'Copied'); };
+function chat(x, me) {
+  const d = document.createElement('div'); d.textContent = x; if (me) d.className = 'me';
+  $('#msgs').append(d); $('#msgs').scrollTop = 1e9;
+}
+$('#chatf').onsubmit = e => {
+  e.preventDefault(); const x = $('#chatin').value.trim(); if (!x) return;
+  send({ t: 'chat', x }); chat(x, true); $('#chatin').value = '';
+};
+
+if (location.hash.length === 7) join(location.hash.slice(1));
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

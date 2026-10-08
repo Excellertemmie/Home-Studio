@@ -1,0 +1,50 @@
+:root{--bg:#120b09;--panel:#1c1310;--line:#33231d;--txt:#f7ece3;--mut:#ac9a8e;--red:#e50914;--blue:#00a8e1;--gold:#f2b56b;--r:12px}
+*{box-sizing:border-box;margin:0}
+html{color-scheme:dark}
+body{min-height:100dvh;color:var(--txt);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+background:radial-gradient(900px 500px at 85% -10%,#43150f 0,transparent 60%),radial-gradient(800px 500px at -10% 110%,#0a2b3a 0,transparent 55%),var(--bg);
+padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px}
+.logo{font:600 26px "Iowan Old Style",Palatino,Georgia,serif;letter-spacing:.01em}
+.logo b{color:var(--gold);font-style:italic;font-weight:600}
+.chip{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--mut);background:var(--panel);border:1px solid var(--line);padding:6px 12px;border-radius:99px}
+.chip i{width:8px;height:8px;border-radius:50%;background:#6b5b52}
+.chip[data-s=ok] i{background:var(--blue);box-shadow:0 0 8px var(--blue)}
+.chip[data-s=wait] i{background:var(--gold)}
+main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;padding:0 20px 24px;max-width:1280px;margin:auto}
+.screen{position:relative;aspect-ratio:16/9;background:#000;border-radius:var(--r);overflow:hidden;box-shadow:0 0 0 1px var(--line),0 24px 80px -20px rgba(229,9,20,.35),0 0 120px -40px var(--blue)}
+video{width:100%;height:100%;display:block;background:#000}
+#empty,#overlay{position:absolute;inset:0;display:grid;place-content:center;text-align:center;pointer-events:none}
+#empty p{font:italic 600 clamp(20px,3.4vw,34px) "Iowan Old Style",Palatino,Georgia,serif;color:var(--gold)}
+#empty small{color:var(--mut)}
+#overlay{font:700 clamp(80px,20vw,200px) Georgia,serif;background:rgba(0,0,0,.55);color:var(--txt)}
+#overlay[hidden]{display:none}
+#banner{margin-top:10px;padding:10px 14px;border-radius:var(--r);background:#2a1a10;border:1px solid var(--gold);color:var(--gold)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.btn,.offset button,input{font:inherit;color:var(--txt)}
+.btn{background:var(--panel);border:1px solid var(--line);padding:9px 14px;border-radius:8px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center;justify-content:center}
+.btn:hover{border-color:var(--mut)}
+.btn.red{background:var(--red);border-color:var(--red);font-weight:600}
+.btn.blue{background:var(--blue);border-color:var(--blue);color:#04141c;font-weight:600}
+.btn.ghost{background:none}
+.wide{width:100%}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.offset{display:flex;align-items:center;gap:4px;margin-left:auto;color:var(--mut);font-size:13px}
+.offset button{background:var(--panel);border:1px solid var(--line);border-radius:6px;min-width:34px;height:34px;cursor:pointer}
+.offset b{min-width:44px;text-align:center;color:var(--txt)}
+#fileinfo{margin-top:8px;color:var(--mut);font-size:13px}
+#fileinfo.warn{color:var(--gold)}
+aside{display:flex;flex-direction:column;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+h2{font:600 18px "Iowan Old Style",Palatino,Georgia,serif;margin-bottom:6px}
+.card p{color:var(--mut);margin-bottom:12px}
+form{display:flex;gap:8px;margin-top:10px}
+input{flex:1;min-width:0;background:#0f0908;border:1px solid var(--line);border-radius:8px;padding:9px 12px;min-height:40px}
+#code{font:700 38px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;color:var(--gold);margin:4px 0 12px}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.chat{flex:1;display:flex;flex-direction:column;min-height:220px}
+#msgs{flex:1;overflow:auto;max-height:260px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+#msgs div{padding:6px 10px;border-radius:10px;background:#2a1c17;max-width:88%;overflow-wrap:anywhere}
+#msgs .me{align-self:flex-end;background:#0c3a4c}
+@media(max-width:860px){main{grid-template-columns:1fr;padding:0 12px 20px}header{padding:12px}.offset{margin-left:0}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

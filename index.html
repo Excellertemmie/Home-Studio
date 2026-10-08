@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Home Studio</title>
+<meta name="theme-color" content="#120b09">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="logo">Home <b>Studio</b></div>
+  <div id="status" class="chip"><i></i><span>Not connected</span></div>
+</header>
+<main>
+  <section class="stage">
+    <div class="screen">
+      <video id="video" controls playsinline></video>
+      <div id="empty"><p>Your private screening room</p><small>Choose your copy of the movie to begin.</small></div>
+      <div id="overlay" hidden></div>
+    </div>
+    <div id="banner" role="status" hidden></div>
+    <div class="bar">
+      <label class="btn red" for="file">Choose movie</label>
+      <input id="file" type="file" accept="video/*,.mkv" hidden>
+      <label class="btn" for="subs">Add subtitles</label>
+      <input id="subs" type="file" accept=".srt,.vtt" hidden>
+      <button id="start" class="btn blue">Start together</button>
+      <button id="resync" class="btn">Resync</button>
+      <div class="offset" title="Shift your timeline if your copy has a different intro">
+        <span>Offset</span>
+        <button data-o="-5">-5</button><button data-o="-1">-1</button>
+        <b id="off">0s</b>
+        <button data-o="1">+1</button><button data-o="5">+5</button>
+      </div>
+    </div>
+    <p id="fileinfo"></p>
+  </section>
+  <aside>
+    <div class="card" id="lobby">
+      <h2>Watch together</h2>
+      <p>Both of you choose the same movie, then connect.</p>
+      <button id="create" class="btn red wide">Create room</button>
+      <form id="joinf">
+        <input id="codein" placeholder="Room code" maxlength="6" autocomplete="off" autocapitalize="characters">
+        <button class="btn blue">Join room</button>
+      </form>
+    </div>
+    <div class="card" id="room" hidden>
+      <h2>Room code</h2>
+      <div id="code"></div>
+      <div class="row">
+        <button id="copycode" class="btn">Copy code</button>
+        <button id="copylink" class="btn">Copy invite link</button>
+        <button id="leave" class="btn ghost">Leave</button>
+      </div>
+    </div>
+    <div class="card chat">
+      <h2>Chat</h2>
+      <div id="msgs"></div>
+      <form id="chatf"><input id="chatin" placeholder="Say something" autocomplete="off"><button class="btn">Send</button></form>
+    </div>
+  </aside>
+</main>
+</body>
+</html>
