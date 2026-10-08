@@ -17,10 +17,10 @@ const PEER_OPTS = TURN.length ? { config: { iceServers: [
 const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
-let key = '', fileName = '', partner = null, retry, left = false;
+let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0;
 
 let priming = false, reqT;
-const quiet = () => lock || priming;
+const quiet = () => lock || priming || document.hidden;
 const note = (d, t) => { $('#log').textContent = 'Last sync message: ' + d + ' ' + t; };
 const send = o => { if (conn && conn.open) { conn.send(o); if (o.t !== 'beat') note('sent', o.t); } };
 const pos = () => v.currentTime - off;
@@ -31,9 +31,11 @@ const play = () => v.play().catch(() => { $('#tap').hidden = false; });
 $('#tap').onclick = () => { $('#tap').hidden = true; v.play(); };
 
 /* ---------- connection ---------- */
-function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; }
-function create() {
-  code = Array.from({ length: 6 }, () => AL[Math.random() * AL.length | 0]).join('');
+function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; $('#mini').textContent = code; fold(false);
+  try { localStorage.setItem('hs:room', JSON.stringify({ code, host, at: Date.now() })); } catch (e) {} }
+function fold(closed) { $('#room').classList.toggle('closed', closed); $('#roomtoggle').setAttribute('aria-expanded', String(!closed)); }
+function create(saved) {
+  code = saved || Array.from({ length: 6 }, () => AL[Math.random() * AL.length | 0]).join('');
   host = true; left = false;
   peer = new Peer(PRE + code, PEER_OPTS); bindPeer();
   peer.on('connection', c => { if (conn && conn.open) try { conn.close(); } catch (e) {} setup(c); });
@@ -48,7 +50,11 @@ function bindPeer() {
   peer.on('open', () => { if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
   peer.on('disconnected', () => { if (!left) peer.reconnect(); });
   peer.on('error', e => {
-    if (e.type === 'unavailable-id' && host) { peer.destroy(); return create(); }
+    if (e.type === 'unavailable-id' && host) {
+      peer.destroy();
+      if (rejoinCode && ++tries < 6) return setTimeout(() => create(rejoinCode), 3000);
+      rejoinCode = ''; return create();
+    }
     if (e.type === 'peer-unavailable') { banner('Room not found yet. Retrying…'); return schedule(); }
     banner('Connection problem (' + e.type + '). Retrying…'); schedule();
   });
@@ -63,20 +69,21 @@ function setup(c) {
   c.on('iceStateChanged', s => {
     if (s === 'failed' && !c.open) { status('Cannot reach partner', 'wait'); banner('Direct connection failed. Switch one of you between Wi-Fi and mobile data, or add a relay (TURN) server in app.js.'); }
   });
-  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); hello(); });
+  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); hello(); });
   c.on('data', onData);
   const gone = () => {
     if (conn !== c || left) return;
     status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
     banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
-    partner = null; info(); schedule();
+    partner = null; info(); fold(false); schedule();
   };
   c.on('close', gone); c.on('error', gone);
 }
 function leave() {
   left = true; clearTimeout(retry);
   try { conn && conn.close(); peer && peer.destroy(); } catch (e) {}
-  conn = peer = null; partner = null; history.replaceState(null, '', location.pathname);
+  try { localStorage.removeItem('hs:room'); } catch (e) {}
+  conn = peer = null; partner = null; code = ''; history.replaceState(null, '', location.pathname);
   $('#room').hidden = true; $('#lobby').hidden = false; banner(''); status('Not connected'); info();
 }
 
@@ -191,6 +198,7 @@ addEventListener('keydown', e => {
 $('#create').onclick = create;
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
+$('#roomtoggle').onclick = () => fold(!$('#room').classList.contains('closed'));
 const flash = (b, t) => { const o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1500); };
 $('#copycode').onclick = e => { navigator.clipboard.writeText(code); flash(e.target, 'Copied'); };
 $('#copylink').onclick = e => { navigator.clipboard.writeText(location.origin + location.pathname + '#' + code); flash(e.target, 'Copied'); };
@@ -203,5 +211,38 @@ $('#chatf').onsubmit = e => {
   send({ t: 'chat', x }); chat(x, true); $('#chatin').value = '';
 };
 
+/* ---------- coming back to the app ---------- */
+function wake() {
+  if (left || !code) return;
+  if (!peer || peer.destroyed) { rejoinCode = code; tries = 0; return host ? create(code) : join(code); }
+  if (peer.disconnected) peer.reconnect();
+  if (conn && conn.open) {
+    // Catch up to your partner; if nobody answers, the link is stale, so drop it and reconnect
+    send({ t: 'req' }); clearTimeout(reqT);
+    reqT = setTimeout(() => { try { conn.close(); } catch (e) {} }, 4000);
+  } else dial();
+}
+let wl;
+async function keepAwake(on) {
+  try {
+    if (on && !wl) { wl = await navigator.wakeLock.request('screen'); wl.addEventListener('release', () => wl = null); }
+    else if (!on && wl) { await wl.release(); wl = null; }
+  } catch (e) {}
+}
+v.addEventListener('playing', () => keepAwake(true));
+v.addEventListener('pause', () => { if (!document.hidden) keepAwake(false); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (!v.paused) keepAwake(true);
+  setTimeout(wake, 500);
+});
+
+/* ---------- start up: invite link, or rejoin the room from before ---------- */
+let saved = null;
+try { saved = JSON.parse(localStorage.getItem('hs:room')); } catch (e) {}
 if (location.hash.length === 7) join(location.hash.slice(1));
+else if (saved && saved.code && Date.now() - saved.at < 6 * 36e5) {
+  $('#empty small').textContent = 'Choose the same movie file again. It will resume where you left off.';
+  if (saved.host) { rejoinCode = saved.code; create(saved.code); } else join(saved.code);
+}
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
