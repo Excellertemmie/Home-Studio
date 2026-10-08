@@ -34,6 +34,10 @@ video{width:100%;height:100%;display:block;background:#000}
 .offset b{min-width:44px;text-align:center;color:var(--txt)}
 #fileinfo{margin-top:8px;color:var(--mut);font-size:13px}
 #fileinfo.warn{color:var(--gold)}
+#log{margin-top:4px;color:var(--mut);font-size:12px;opacity:.8}
+#overlay{z-index:2}
+#tap{position:absolute;inset:0;margin:auto;width:max-content;height:max-content;z-index:3;padding:14px 22px;font-size:16px}
+#tap[hidden]{display:none}
 aside{display:flex;flex-direction:column;gap:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
 h2{font:600 18px "Iowan Old Style",Palatino,Georgia,serif;margin-bottom:6px}
