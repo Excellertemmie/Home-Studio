@@ -27,6 +27,7 @@ video{width:100%;height:100%;display:block;background:#000}
 .btn.red{background:var(--red);border-color:var(--red);font-weight:600}
 .btn.blue{background:var(--blue);border-color:var(--blue);color:#04141c;font-weight:600}
 .btn.ghost{background:none}
+.btn:disabled,.btn.blue:disabled{background:#241a17;border-color:var(--line);color:#7a6a60;cursor:not-allowed;opacity:.7}
 .wide{width:100%}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .offset{display:flex;align-items:center;gap:4px;margin-left:auto;color:var(--mut);font-size:13px}
@@ -52,6 +53,15 @@ input{flex:1;min-width:0;background:#0f0908;border:1px solid var(--line);border-
 #room.closed #roombody{display:none}
 #room.closed #mini{display:inline}
 #room.closed .chev{transform:rotate(-90deg)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+#chatbody{display:flex;flex-direction:column;flex:1;min-height:0}
+.chat:not(.closed) .head{margin-bottom:6px}
+.chat.closed{min-height:0;flex:none}
+.chat.closed #chatbody{display:none}
+.chat.closed .chev{transform:rotate(-90deg)}
+#unread{background:var(--red);color:#fff;font-size:12px;font-weight:700;border-radius:99px;padding:1px 8px}
+#unread[hidden]{display:none}
+#msgs .sys{align-self:center;background:none;color:var(--mut);font-size:12px;font-style:italic}
 #code{font:700 38px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;color:var(--gold);margin:4px 0 12px}
 .row{display:flex;flex-wrap:wrap;gap:8px}
 .chat{flex:1;display:flex;flex-direction:column;min-height:220px}
