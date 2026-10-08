@@ -23,6 +23,7 @@
       <video id="video" controls playsinline></video>
       <div id="empty"><p>Your private screening room</p><small>Choose your copy of the movie to begin.</small></div>
       <div id="overlay" hidden></div>
+      <button id="tap" class="btn red" hidden>Tap to play with your partner</button>
     </div>
     <div id="banner" role="status" hidden></div>
     <div class="bar">
@@ -31,7 +32,8 @@
       <label class="btn" for="subs">Add subtitles</label>
       <input id="subs" type="file" accept=".srt,.vtt" hidden>
       <button id="start" class="btn blue">Start together</button>
-      <button id="resync" class="btn">Resync</button>
+      <button id="resync" class="btn" title="Jump to where your partner is">Resync</button>
+      <button id="fs" class="btn">Fullscreen</button>
       <div class="offset" title="Shift your timeline if your copy has a different intro">
         <span>Offset</span>
         <button data-o="-5">-5</button><button data-o="-1">-1</button>
@@ -40,6 +42,7 @@
       </div>
     </div>
     <p id="fileinfo"></p>
+    <p id="log"></p>
   </section>
   <aside>
     <div class="card" id="lobby">
