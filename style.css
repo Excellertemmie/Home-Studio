@@ -44,6 +44,14 @@ h2{font:600 18px "Iowan Old Style",Palatino,Georgia,serif;margin-bottom:6px}
 .card p{color:var(--mut);margin-bottom:12px}
 form{display:flex;gap:8px;margin-top:10px}
 input{flex:1;min-width:0;background:#0f0908;border:1px solid var(--line);border-radius:8px;padding:9px 12px;min-height:40px}
+.head{display:flex;align-items:center;gap:10px;width:100%;background:none;border:0;color:inherit;font:inherit;padding:0;text-align:left;cursor:pointer;min-height:32px}
+.ttl{flex:1;font:600 18px "Iowan Old Style",Palatino,Georgia,serif}
+#mini{display:none;font:600 14px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.14em;color:var(--gold)}
+.chev{color:var(--mut);transition:transform .2s}
+#room:not(.closed) .head{margin-bottom:6px}
+#room.closed #roombody{display:none}
+#room.closed #mini{display:inline}
+#room.closed .chev{transform:rotate(-90deg)}
 #code{font:700 38px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.18em;color:var(--gold);margin:4px 0 12px}
 .row{display:flex;flex-wrap:wrap;gap:8px}
 .chat{flex:1;display:flex;flex-direction:column;min-height:220px}
