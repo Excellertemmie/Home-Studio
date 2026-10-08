@@ -18,7 +18,7 @@ video{width:100%;height:100%;display:block;background:#000}
 #empty p{font:italic 600 clamp(20px,3.4vw,34px) "Iowan Old Style",Palatino,Georgia,serif;color:var(--gold)}
 #empty small{color:var(--mut)}
 #overlay{font:700 clamp(80px,20vw,200px) Georgia,serif;background:rgba(0,0,0,.55);color:var(--txt)}
-#overlay[hidden]{display:none}
+#overlay[hidden],#empty[hidden]{display:none}
 #banner{margin-top:10px;padding:10px 14px;border-radius:var(--r);background:#2a1a10;border:1px solid var(--gold);color:var(--gold)}
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 .btn,.offset button,input{font:inherit;color:var(--txt)}

@@ -1,7 +1,13 @@
 // Home Studio: syncs play/pause/seek between two browsers. Video files never leave your device.
 // Signaling: PeerJS free public server. To use your own, set PEER_OPTS = {host:'your-host',port:443,secure:true,path:'/'}
 // For strict networks add a TURN server: PEER_OPTS = {config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'turn:YOUR_TURN',username:'u',credential:'p'}]}}
-const PEER_OPTS = {};
+// Relay (TURN) for people on different networks/states. Sign up free at metered.ca, then paste your TURN entries here, e.g.
+// const TURN = [{urls:'turn:relay.metered.ca:80',username:'YOUR_USER',credential:'YOUR_PASS'},{urls:'turn:relay.metered.ca:443?transport=tcp',username:'YOUR_USER',credential:'YOUR_PASS'}];
+const TURN = [];
+const PEER_OPTS = TURN.length ? { config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  ...TURN] } } : {};
 const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
@@ -41,7 +47,13 @@ function dial() { if (left || host || (conn && conn.open) || !peer || peer.destr
 function schedule() { clearTimeout(retry); if (!host && !left) retry = setTimeout(dial, 3000); }
 function setup(c) {
   conn = c;
-  c.on('open', () => { clearTimeout(retry); banner(''); status('Connected', 'ok'); hello(); });
+  const slow = setTimeout(() => {
+    if (!c.open && conn === c) { status('Cannot reach partner', 'wait'); banner("Can't connect yet. A network may be blocking direct links. Try switching one of you between Wi-Fi and mobile data, then rejoin."); }
+  }, 20000);
+  c.on('iceStateChanged', s => {
+    if (s === 'failed' && !c.open) { status('Cannot reach partner', 'wait'); banner('Direct connection failed. Switch one of you between Wi-Fi and mobile data, or add a relay (TURN) server in app.js.'); }
+  });
+  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); hello(); });
   c.on('data', onData);
   const gone = () => {
     if (conn !== c || left) return;
