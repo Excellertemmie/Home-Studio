@@ -17,12 +17,12 @@ const PEER_OPTS = TURN.length ? { config: { iceServers: [
 const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
-let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0;
+let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false;
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
 const note = (d, t) => { $('#log').textContent = 'Last sync message: ' + d + ' ' + t; };
-const send = o => { if (conn && conn.open) { conn.send(o); if (o.t !== 'beat') note('sent', o.t); } };
+const send = o => { if (conn && conn.open) { conn.send(o); if (o.t !== 'beat' && o.t !== 'ping') note('sent', o.t); } };
 const pos = () => v.currentTime - off;
 const status = (t, s) => { $('#status span').textContent = t; $('#status').dataset.s = s || ''; };
 const banner = t => { const b = $('#banner'); b.textContent = t || ''; b.hidden = !t; };
@@ -69,13 +69,13 @@ function setup(c) {
   c.on('iceStateChanged', s => {
     if (s === 'failed' && !c.open) { status('Cannot reach partner', 'wait'); banner('Direct connection failed. Switch one of you between Wi-Fi and mobile data, or add a relay (TURN) server in app.js.'); }
   });
-  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); hello(); });
+  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); everConn = true; pAway = false; lastSeen = Date.now(); refreshPresence(); hello(); });
   c.on('data', onData);
   const gone = () => {
     if (conn !== c || left) return;
     status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
     banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
-    partner = null; info(); fold(false); schedule();
+    partner = null; info(); fold(false); refreshPresence(); schedule();
   };
   c.on('close', gone); c.on('error', gone);
 }
@@ -83,7 +83,7 @@ function leave() {
   left = true; clearTimeout(retry);
   try { conn && conn.close(); peer && peer.destroy(); } catch (e) {}
   try { localStorage.removeItem('hs:room'); } catch (e) {}
-  conn = peer = null; partner = null; code = ''; history.replaceState(null, '', location.pathname);
+  conn = peer = null; partner = null; code = ''; everConn = false; pAway = false; refreshPresence(); history.replaceState(null, '', location.pathname);
   $('#room').hidden = true; $('#lobby').hidden = false; banner(''); status('Not connected'); info();
 }
 
@@ -93,9 +93,11 @@ const beat = f => ({ t: 'beat', p: pos(), pl: !v.paused, f });
 const MEDIA = ['play', 'pause', 'seek', 'beat', 'wait', 'ready', 'req'];
 function onData(m) {
   const t = m.t, tgt = (m.p || 0) + off;
-  if (t !== 'beat') note('received', t);
+  lastSeen = Date.now();
+  if (t !== 'beat' && t !== 'ping') note('received', t);
   if (MEDIA.includes(t) && !v.src) return;
-  if (t === 'hello') { partner = m; info(); }
+  if (t === 'ping') setAway(m.a);
+  else if (t === 'hello') { partner = m; info(); updateStart(); }
   else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
   else if (t === 'pause') apply(() => { v.pause(); v.currentTime = tgt; });
   else if (t === 'seek') apply(() => { v.currentTime = tgt; });
@@ -162,11 +164,11 @@ $('#subs').onchange = async e => {
 /* ---------- controls ---------- */
 function count() {
   if (!v.src) return banner('Choose your movie first.');
-  let n = 3; apply(() => v.pause());
+  let n = 3; counting = true; updateStart(); apply(() => v.pause());
   const o = $('#overlay'); o.hidden = false; o.textContent = n;
   const i = setInterval(() => {
     n--; if (n > 0) o.textContent = n;
-    else { clearInterval(i); o.hidden = true; apply(play); }
+    else { clearInterval(i); o.hidden = true; counting = false; apply(play); updateStart(); }
   }, 1000);
 }
 $('#start').onclick = () => { if (!conn || !conn.open) return banner('Connect to your partner first.'); send({ t: 'count' }); count(); };
@@ -199,11 +201,19 @@ $('#create').onclick = () => create();
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
 $('#roomtoggle').onclick = () => fold(!$('#room').classList.contains('closed'));
+let unread = 0;
+function foldChat(c) {
+  $('.chat').classList.toggle('closed', c); $('#chattoggle').setAttribute('aria-expanded', String(!c));
+  if (!c) { unread = 0; $('#unread').hidden = true; $('#msgs').scrollTop = 1e9; }
+}
+$('#chattoggle').onclick = () => foldChat(!$('.chat').classList.contains('closed'));
+foldChat(matchMedia('(max-width:860px)').matches);
 const flash = (b, t) => { const o = b.textContent; b.textContent = t; setTimeout(() => b.textContent = o, 1500); };
 $('#copycode').onclick = e => { navigator.clipboard.writeText(code); flash(e.target, 'Copied'); };
 $('#copylink').onclick = e => { navigator.clipboard.writeText(location.origin + location.pathname + '#' + code); flash(e.target, 'Copied'); };
 function chat(x, me) {
   const d = document.createElement('div'); d.textContent = x; if (me) d.className = 'me';
+  if (!me && $('.chat').classList.contains('closed')) { unread++; $('#unread').textContent = unread; $('#unread').hidden = false; }
   $('#msgs').append(d); $('#msgs').scrollTop = 1e9;
 }
 $('#chatf').onsubmit = e => {
@@ -222,6 +232,35 @@ function wake() {
     reqT = setTimeout(() => { try { conn.close(); } catch (e) {} }, 4000);
   } else dial();
 }
+/* ---------- partner presence ---------- */
+// Start together is active only when you are connected, both movies are chosen, and playback is paused
+function updateStart() {
+  const ok = !!(conn && conn.open && v.src && partner && partner.name && v.paused && !counting);
+  const b = $('#start'); b.disabled = !ok;
+  b.title = ok ? '' : 'Needs: partner connected, both movies chosen, and playback paused';
+}
+['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
+function refreshPresence() {
+  updateStart();
+  const p = $('#presence'), s = p.querySelector('span');
+  if (!conn || !conn.open) {
+    p.hidden = !everConn; p.dataset.s = ''; s.textContent = 'Partner offline'; return;
+  }
+  p.hidden = false;
+  const quiet = Date.now() - lastSeen > 12000;
+  if (pAway) { p.dataset.s = 'wait'; s.textContent = 'Partner is away'; }
+  else if (quiet) { p.dataset.s = 'wait'; s.textContent = 'Partner not responding'; }
+  else { p.dataset.s = 'ok'; s.textContent = 'Partner is here'; }
+}
+function sys(x) {
+  const d = document.createElement('div'); d.className = 'sys'; d.textContent = x;
+  $('#msgs').append(d); $('#msgs').scrollTop = 1e9;
+}
+function setAway(a) {
+  if (a !== pAway) { pAway = a; sys(a ? 'Your partner switched to another app.' : 'Your partner is back.'); }
+  refreshPresence();
+}
+setInterval(() => { if (conn && conn.open) send({ t: 'ping', a: document.hidden }); refreshPresence(); }, 3000);
 let wl;
 async function keepAwake(on) {
   try {
@@ -232,6 +271,7 @@ async function keepAwake(on) {
 v.addEventListener('playing', () => keepAwake(true));
 v.addEventListener('pause', () => { if (!document.hidden) keepAwake(false); });
 document.addEventListener('visibilitychange', () => {
+  send({ t: 'ping', a: document.hidden });
   if (document.hidden) return;
   if (!v.paused) keepAwake(true);
   setTimeout(wake, 500);
