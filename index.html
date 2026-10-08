@@ -55,12 +55,16 @@
       </form>
     </div>
     <div class="card" id="room" hidden>
-      <h2>Room code</h2>
-      <div id="code"></div>
-      <div class="row">
-        <button id="copycode" class="btn">Copy code</button>
-        <button id="copylink" class="btn">Copy invite link</button>
-        <button id="leave" class="btn ghost">Leave</button>
+      <button id="roomtoggle" class="head" aria-expanded="true" aria-controls="roombody">
+        <span class="ttl">Room code</span><span id="mini"></span><span class="chev" aria-hidden="true">▾</span>
+      </button>
+      <div id="roombody">
+        <div id="code"></div>
+        <div class="row">
+          <button id="copycode" class="btn">Copy code</button>
+          <button id="copylink" class="btn">Copy invite link</button>
+          <button id="leave" class="btn ghost">Leave</button>
+        </div>
       </div>
     </div>
     <div class="card chat">
