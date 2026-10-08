@@ -195,7 +195,7 @@ addEventListener('keydown', e => {
 });
 
 /* ---------- lobby + chat ---------- */
-$('#create').onclick = create;
+$('#create').onclick = () => create();
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
 $('#roomtoggle').onclick = () => fold(!$('#room').classList.contains('closed'));
