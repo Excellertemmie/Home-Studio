@@ -25,6 +25,7 @@
     <div class="screen">
       <video id="video" controls playsinline></video>
       <div id="empty"><p>Your private screening room</p><small>Choose your copy of the movie to begin.</small></div>
+      <video id="live" controls playsinline autoplay hidden></video>
       <div id="overlay" hidden></div>
       <button id="tap" class="btn red" hidden>Tap to play with your partner</button>
     </div>
@@ -37,6 +38,8 @@
       <button id="start" class="btn blue" disabled>Start together</button>
       <button id="resync" class="btn" title="Jump to where your partner is">Resync</button>
       <button id="fs" class="btn">Fullscreen</button>
+      <button id="sendfile" class="btn" disabled title="Send your movie file to your partner">Send my movie</button>
+      <button id="golive" class="btn" disabled title="Stream your movie to your partner live">Live stream</button>
       <div class="offset" title="Shift your timeline if your copy has a different intro">
         <span>Offset</span>
         <button data-o="-5">-5</button><button data-o="-1">-1</button>
@@ -44,6 +47,7 @@
         <button data-o="1">+1</button><button data-o="5">+5</button>
       </div>
     </div>
+    <div id="xfer" hidden><span id="xtxt"></span><progress id="xbar" max="100" value="0"></progress><button id="xcancel" class="btn ghost">Cancel</button></div>
     <p id="fileinfo"></p>
     <p id="log"></p>
   </section>
