@@ -17,7 +17,8 @@ const PEER_OPTS = TURN.length ? { config: { iceServers: [
 const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
-let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false;
+let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false,
+    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null;
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
@@ -49,6 +50,7 @@ function join(c) {
 function bindPeer() {
   peer.on('open', () => { if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
   peer.on('disconnected', () => { if (!left) peer.reconnect(); });
+  peer.on('call', c => { c.answer(); liveCall = c; c.on('stream', showLive); c.on('close', hideLive); });
   peer.on('error', e => {
     if (e.type === 'unavailable-id' && host) {
       peer.destroy();
@@ -75,6 +77,7 @@ function setup(c) {
     if (conn !== c || left) return;
     status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
     banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
+    sending = recv = liveOut = null; if (liveIn) hideLive(); hideX();
     partner = null; info(); fold(false); refreshPresence(); schedule();
   };
   c.on('close', gone); c.on('error', gone);
@@ -94,8 +97,9 @@ const MEDIA = ['play', 'pause', 'seek', 'beat', 'wait', 'ready', 'req'];
 function onData(m) {
   const t = m.t, tgt = (m.p || 0) + off;
   lastSeen = Date.now();
-  if (t !== 'beat' && t !== 'ping') note('received', t);
-  if (MEDIA.includes(t) && !v.src) return;
+  if (t !== 'beat' && t !== 'ping' && t !== 'xc') note('received', t);
+  if (MEDIA.includes(t) && (!v.src || liveIn)) return;
+  if (SHARE.includes(t)) return shareMsg(m);
   if (t === 'ping') setAway(m.a);
   else if (t === 'hello') { partner = m; info(); updateStart(); }
   else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
@@ -126,14 +130,16 @@ v.addEventListener('playing', () => { clearTimeout(waitT); if (selfWait) { selfW
 setInterval(() => { if (host && v.src && !selfWait) send(beat(false)); }, 2000);
 
 /* ---------- file, subtitles, info ---------- */
-$('#file').onchange = e => {
-  const f = e.target.files[0]; if (!f) return;
-  fileName = f.name; key = 'hs:' + f.name + f.size;
+$('#file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0], true); };
+function loadFile(f, prime) {
+  curFile = f; fileName = f.name; key = 'hs:' + f.name + f.size;
   v.src = URL.createObjectURL(f); $('#empty').hidden = true; banner('');
   // Brief muted play/pause during this tap so phones allow your partner's play command later
-  priming = true; v.muted = true;
-  v.play().then(() => apply(() => v.pause())).catch(() => {}).finally(() => { v.muted = false; priming = false; });
-};
+  if (prime) {
+    priming = true; v.muted = true;
+    v.play().then(() => apply(() => v.pause())).catch(() => {}).finally(() => { v.muted = false; priming = false; });
+  }
+}
 v.onloadedmetadata = () => {
   let s = 0; try { s = +localStorage.getItem(key); } catch (e) {}
   if (s > 5 && s < v.duration - 10) apply(() => { v.currentTime = s; });
@@ -221,6 +227,86 @@ $('#chatf').onsubmit = e => {
   send({ t: 'chat', x }); chat(x, true); $('#chatin').value = '';
 };
 
+/* ---------- share my movie: send the file, or live stream ---------- */
+const SHARE = ['xo', 'xg', 'xn', 'xc', 'xe', 'xx', 'lo', 'lg', 'ln', 'ls', 'lx'];
+const mb = n => (n / 1e6).toFixed(0) + ' MB';
+function showX(txt, pct, cancel) {
+  $('#xfer').hidden = false; $('#xtxt').textContent = txt; cancelFn = cancel;
+  $('#xbar').hidden = pct == null; if (pct != null) $('#xbar').value = pct; updateStart();
+}
+function hideX() { $('#xfer').hidden = true; cancelFn = null; updateStart(); }
+$('#xcancel').onclick = () => cancelFn && cancelFn();
+const cancelSend = () => { send({ t: 'xx' }); sending = null; hideX(); };
+
+// Option A: send the movie file straight to your partner's device
+$('#sendfile').onclick = () => {
+  if (!curFile) return;
+  send({ t: 'xo', name: curFile.name, size: curFile.size, type: curFile.type });
+  sending = { off: 0, last: -1 }; showX('Waiting for your partner to accept…', null, cancelSend);
+};
+async function pump() {
+  const f = curFile; if (!f) return;
+  const s = sending = { off: 0, last: -1 }, dc = conn.dataChannel;
+  showX('Sending ' + f.name + '…', 0, cancelSend);
+  while (sending === s && s.off < f.size && conn && conn.open) {
+    if ((dc && dc.bufferedAmount > 4e6) || conn.bufferSize > 50) { await new Promise(r => setTimeout(r, 40)); continue; }
+    const buf = await f.slice(s.off, s.off + 65536).arrayBuffer();
+    if (sending !== s) return;
+    conn.send({ t: 'xc', d: buf }); s.off += buf.byteLength;
+    const p = Math.floor(s.off / f.size * 100);
+    if (p !== s.last) { s.last = p; showX('Sending ' + f.name + ' ' + p + '%', p, cancelSend); }
+  }
+  if (sending === s && s.off >= f.size) { send({ t: 'xe' }); sending = null; hideX(); banner('Movie sent. Your partner now has it.'); }
+}
+
+// Option B: stream the movie live while it plays on your screen
+$('#golive').onclick = () => {
+  const s = v.captureStream ? v.captureStream() : v.mozCaptureStream ? v.mozCaptureStream() : null;
+  if (!s) return banner("This browser can't live stream. Try Chrome on a laptop or Android, or use Send my movie.");
+  liveOut = s; send({ t: 'lo' }); showX('Waiting for your partner to accept the live stream…', null, stopLive);
+};
+function stopLive() {
+  send({ t: 'ls' }); try { liveCall && liveCall.close(); } catch (e) {}
+  liveCall = liveOut = null; hideX();
+}
+function showLive(s) {
+  liveIn = true; const l = $('#live'); l.srcObject = s; l.hidden = false; l.play().catch(() => {});
+  apply(() => v.pause()); showX("Watching your partner's live stream", null, stopWatch);
+}
+function hideLive() {
+  liveIn = false; const l = $('#live'); l.srcObject = null; l.hidden = true;
+  try { liveCall && liveCall.close(); } catch (e) {} liveCall = null; hideX();
+}
+function stopWatch() { send({ t: 'lx' }); hideLive(); }
+
+function shareMsg(m) {
+  const t = m.t;
+  if (t === 'xo') {
+    if (confirm('Your partner wants to send you "' + m.name + '" (' + mb(m.size) + '). Accept?')) {
+      recv = { name: m.name, size: m.size, type: m.type, got: 0, parts: [], last: -1 };
+      send({ t: 'xg' }); showX('Receiving ' + m.name + '…', 0, () => { send({ t: 'xx' }); recv = null; hideX(); });
+    } else send({ t: 'xn' });
+  } else if (t === 'xg') pump();
+  else if (t === 'xn') { sending = null; hideX(); banner('Your partner declined the movie file.'); }
+  else if (t === 'xc' && recv) {
+    recv.parts.push(m.d); recv.got += m.d.byteLength;
+    if (recv.parts.length > 512) recv.parts = [new Blob(recv.parts)]; // let the browser manage big files
+    const p = Math.floor(recv.got / recv.size * 100);
+    if (p !== recv.last) { recv.last = p; showX('Receiving ' + recv.name + ' ' + p + '%', p, cancelFn); }
+  } else if (t === 'xe' && recv) {
+    const f = new File(recv.parts, recv.name, { type: recv.type || 'video/mp4' }), ok = f.size === recv.size;
+    recv = null; hideX(); loadFile(f, false);
+    banner(ok ? 'Movie received. You can now watch together.' : 'The file may be incomplete. Ask your partner to send it again.');
+  } else if (t === 'xx') { sending = recv = null; hideX(); banner('The transfer was cancelled.'); }
+  else if (t === 'lo') send({ t: confirm('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
+  else if (t === 'lg' && liveOut) {
+    liveCall = peer.call(conn.peer, liveOut);
+    showX('Live streaming to your partner. Press play on your movie.', null, stopLive);
+  } else if (t === 'ln') { liveOut = null; hideX(); banner('Your partner declined the live stream.'); }
+  else if (t === 'ls') hideLive();
+  else if (t === 'lx') { try { liveCall && liveCall.close(); } catch (e) {} liveCall = liveOut = null; hideX(); banner('Your partner stopped watching.'); }
+}
+
 /* ---------- coming back to the app ---------- */
 function wake() {
   if (left || !code) return;
@@ -238,6 +324,7 @@ function updateStart() {
   const ok = !!(conn && conn.open && v.src && partner && partner.name && v.paused && !counting);
   const b = $('#start'); b.disabled = !ok;
   b.title = ok ? '' : 'Needs: partner connected, both movies chosen, and playback paused';
+  $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn);
 }
 ['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
 function refreshPresence() {
