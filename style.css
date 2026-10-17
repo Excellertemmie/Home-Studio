@@ -74,5 +74,30 @@ input{flex:1;min-width:0;background:#0f0908;border:1px solid var(--line);border-
 #msgs{flex:1;overflow:auto;max-height:260px;display:flex;flex-direction:column;gap:6px;font-size:14px}
 #msgs div{padding:6px 10px;border-radius:10px;background:#2a1c17;max-width:88%;overflow-wrap:anywhere}
 #msgs .me{align-self:flex-end;background:#0c3a4c}
-@media(max-width:860px){main{grid-template-columns:1fr;padding:0 12px 20px}header{padding:12px}.offset{margin-left:0}}
+.menu{position:relative}
+.menu summary{list-style:none;cursor:pointer;user-select:none}
+.menu summary::-webkit-details-marker{display:none}
+.menu summary::after{content:"\25BE";margin-left:8px;color:var(--mut)}
+.pop{position:absolute;z-index:20;top:calc(100% + 6px);left:0;min-width:230px;max-width:calc(100vw - 24px);background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.menu.r .pop{left:auto;right:0}
+.pop .offset{margin:0;flex-wrap:wrap}
+#empty ol{margin:14px auto 8px;padding:0;list-style:none;text-align:left;display:inline-block;counter-reset:s}
+#empty li{counter-increment:s;margin:8px 0;color:var(--txt);font-size:15px}
+#empty li::before{content:counter(s);display:inline-grid;place-items:center;width:22px;height:22px;margin-right:10px;border-radius:50%;background:var(--red);font-size:12px;font-weight:700}
+#toast{position:absolute;left:12px;bottom:72px;max-width:70%;z-index:4;background:rgba(0,0,0,.72);padding:8px 12px;border-radius:10px;pointer-events:none;overflow-wrap:anywhere}
+#toast[hidden]{display:none}
+dialog{background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:var(--r);padding:20px;max-width:min(92vw,420px);margin:auto}
+dialog::backdrop{background:rgba(0,0,0,.65)}
+dialog p{margin-bottom:16px;line-height:1.5}
+dialog .row{justify-content:flex-end}
+body.theatre{background:#050302}
+.theatre header,.theatre aside,.theatre .bar,.theatre #fileinfo,.theatre #log,.theatre #banner{opacity:.15;transition:opacity .3s}
+.theatre header:hover,.theatre aside:hover,.theatre .bar:hover,.theatre .bar:focus-within,.theatre aside:focus-within{opacity:1}
+@media(max-width:860px){
+  main{grid-template-columns:1fr;padding:0 12px 20px}header{padding:12px}.offset{margin-left:0}
+  .stage,aside{display:contents}
+  #lobby{order:0}
+  .screen{order:1;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+  #banner{order:2}#room{order:3}.bar{order:4}#xfer{order:5}#fileinfo{order:6}#log{order:7}.chat{order:8}
+}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
