@@ -10,15 +10,22 @@ const TURN = [
   { urls: 'turn:global.relay.metered.ca:443', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
   { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' }
 ];
-const PEER_OPTS = TURN.length ? { config: { iceServers: [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
-  ...TURN] } } : {};
+// Short-lived credentials come from /api/turn (see api/turn.js). TURN above is only the fallback.
+let ICE = null;
+async function peerOpts() {
+  if (!ICE) {
+    try { const r = await fetch('/api/turn', { cache: 'no-store' }); const a = r.ok && await r.json(); if (Array.isArray(a) && a.length) ICE = a; } catch (e) {}
+  }
+  return { config: { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+    ...(ICE || TURN)] } };
+}
 const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
 let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false,
-    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null;
+    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null;
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
@@ -35,17 +42,17 @@ $('#tap').onclick = () => { $('#tap').hidden = true; v.play(); };
 function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; $('#mini').textContent = code; fold(false);
   try { localStorage.setItem('hs:room', JSON.stringify({ code, host, at: Date.now() })); } catch (e) {} }
 function fold(closed) { $('#room').classList.toggle('closed', closed); $('#roomtoggle').setAttribute('aria-expanded', String(!closed)); }
-function create(saved) {
+async function create(saved) {
   code = saved || Array.from({ length: 6 }, () => AL[Math.random() * AL.length | 0]).join('');
   host = true; left = false;
-  peer = new Peer(PRE + code, PEER_OPTS); bindPeer();
+  peer = new Peer(PRE + code, await peerOpts()); bindPeer();
   peer.on('connection', c => { if (conn && conn.open) try { conn.close(); } catch (e) {} setup(c); });
 }
-function join(c) {
+async function join(c) {
   code = c.toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length !== 6) return banner('Enter the 6-character room code.');
   host = false; left = false; showRoom(); status('Connecting…', 'wait');
-  peer = new Peer(PEER_OPTS); bindPeer(); peer.on('open', dial);
+  peer = new Peer(await peerOpts()); bindPeer(); peer.on('open', dial);
 }
 function bindPeer() {
   peer.on('open', () => { if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
@@ -71,13 +78,13 @@ function setup(c) {
   c.on('iceStateChanged', s => {
     if (s === 'failed' && !c.open) { status('Cannot reach partner', 'wait'); banner('Direct connection failed. Switch one of you between Wi-Fi and mobile data, or add a relay (TURN) server in app.js.'); }
   });
-  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); everConn = true; pAway = false; lastSeen = Date.now(); refreshPresence(); hello(); });
+  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); everConn = true; pAway = false; lastSeen = Date.now(); refreshPresence(); hello(); setTimeout(checkRoute, 2500); });
   c.on('data', onData);
   const gone = () => {
     if (conn !== c || left) return;
     status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
     banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
-    sending = recv = liveOut = null; if (liveIn) hideLive(); hideX();
+    sending = recv = liveOut = null; relayed = null; if (liveIn) hideLive(); hideX();
     partner = null; info(); fold(false); refreshPresence(); schedule();
   };
   c.on('close', gone); c.on('error', gone);
@@ -204,6 +211,16 @@ addEventListener('keydown', e => {
 
 /* ---------- lobby + chat ---------- */
 $('#create').onclick = () => create();
+// Menus (Share movie, Sync tools) close when you tap elsewhere or choose a share option
+const closeMenus = () => document.querySelectorAll('details.menu[open]').forEach(d => d.open = false);
+document.addEventListener('click', e => document.querySelectorAll('details.menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }));
+['#sendfile', '#golive', '#resync'].forEach(s => $(s).addEventListener('click', closeMenus));
+// Theatre mode dims everything except the movie
+$('#theatre').onclick = () => document.body.classList.toggle('theatre');
+// New chat messages appear over the picture in fullscreen
+let tt;
+function toast(x) { const t = $('#toast'); t.textContent = x; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 4500); }
+setInterval(() => { if (conn && conn.open) checkRoute(); }, 15000);
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
 $('#roomtoggle').onclick = () => fold(!$('#room').classList.contains('closed'));
@@ -219,6 +236,7 @@ $('#copycode').onclick = e => { navigator.clipboard.writeText(code); flash(e.tar
 $('#copylink').onclick = e => { navigator.clipboard.writeText(location.origin + location.pathname + '#' + code); flash(e.target, 'Copied'); };
 function chat(x, me) {
   const d = document.createElement('div'); d.textContent = x; if (me) d.className = 'me';
+  if (!me && (document.fullscreenElement || document.webkitFullscreenElement)) toast(x);
   if (!me && $('.chat').classList.contains('closed')) { unread++; $('#unread').textContent = unread; $('#unread').hidden = false; }
   $('#msgs').append(d); $('#msgs').scrollTop = 1e9;
 }
@@ -236,6 +254,49 @@ function showX(txt, pct, cancel) {
 }
 function hideX() { $('#xfer').hidden = true; cancelFn = null; updateStart(); }
 $('#xcancel').onclick = () => cancelFn && cancelFn();
+
+// Is this connection going through the relay (uses limited data) or directly between you?
+async function routeOf(pc) {
+  try {
+    const st = await pc.getStats(); let pair; const c = {};
+    st.forEach(r => {
+      if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || r.selected)) pair = r;
+      if (/candidate$/.test(r.type)) c[r.id] = r;
+    });
+    if (!pair) return null;
+    const l = c[pair.localCandidateId], q = c[pair.remoteCandidateId];
+    return !!((l && l.candidateType === 'relay') || (q && q.candidateType === 'relay'));
+  } catch (e) { return null; }
+}
+async function checkRoute() {
+  if (!conn || !conn.open || !conn.peerConnection) return;
+  const r = await routeOf(conn.peerConnection); if (r === null) return;
+  relayed = r; status('Connected · ' + (r ? 'via relay' : 'direct'), 'ok');
+  if (r && (sending || recv || liveOut || liveIn)) {
+    if (sending) cancelSend(); else if (recv) { send({ t: 'xx' }); recv = null; hideX(); }
+    else if (liveOut) stopLive(); else stopWatch();
+    banner('Movie sharing stopped: your connection goes through a relay, which uses limited data.');
+  }
+  updateStart();
+}
+function guardLive() {
+  setTimeout(async () => {
+    const pc = liveCall && liveCall.peerConnection;
+    if (!pc || !(liveOut || liveIn)) return;
+    if (await routeOf(pc) === true) {
+      if (liveOut) stopLive(); else stopWatch();
+      banner('Live stream stopped: it was going through a relay, which uses limited data.');
+    }
+  }, 4000);
+}
+function ask(q) {
+  return new Promise(res => {
+    const d = $('#dlg'); $('#dq').textContent = q;
+    const done = ok => { d.close(); res(ok); };
+    $('#dyes').onclick = () => done(true); $('#dno').onclick = () => done(false);
+    d.oncancel = () => res(false); d.showModal();
+  });
+}
 const cancelSend = () => { send({ t: 'xx' }); sending = null; hideX(); };
 
 // Option A: send the movie file straight to your partner's device
@@ -271,7 +332,7 @@ function stopLive() {
 }
 function showLive(s) {
   liveIn = true; const l = $('#live'); l.srcObject = s; l.hidden = false; l.play().catch(() => {});
-  apply(() => v.pause()); showX("Watching your partner's live stream", null, stopWatch);
+  apply(() => v.pause()); showX("Watching your partner's live stream", null, stopWatch); guardLive();
 }
 function hideLive() {
   liveIn = false; const l = $('#live'); l.srcObject = null; l.hidden = true;
@@ -279,10 +340,11 @@ function hideLive() {
 }
 function stopWatch() { send({ t: 'lx' }); hideLive(); }
 
-function shareMsg(m) {
+async function shareMsg(m) {
   const t = m.t;
   if (t === 'xo') {
-    if (confirm('Your partner wants to send you "' + m.name + '" (' + mb(m.size) + '). Accept?')) {
+    if (relayed === true) send({ t: 'xn' });
+    else if (await ask('Your partner wants to send you "' + m.name + '" (' + mb(m.size) + '). Accept?')) {
       recv = { name: m.name, size: m.size, type: m.type, got: 0, parts: [], last: -1 };
       send({ t: 'xg' }); showX('Receiving ' + m.name + '…', 0, () => { send({ t: 'xx' }); recv = null; hideX(); });
     } else send({ t: 'xn' });
@@ -298,9 +360,9 @@ function shareMsg(m) {
     recv = null; hideX(); loadFile(f, false);
     banner(ok ? 'Movie received. You can now watch together.' : 'The file may be incomplete. Ask your partner to send it again.');
   } else if (t === 'xx') { sending = recv = null; hideX(); banner('The transfer was cancelled.'); }
-  else if (t === 'lo') send({ t: confirm('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
+  else if (t === 'lo') send({ t: relayed !== true && await ask('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
   else if (t === 'lg' && liveOut) {
-    liveCall = peer.call(conn.peer, liveOut);
+    liveCall = peer.call(conn.peer, liveOut); guardLive();
     showX('Live streaming to your partner. Press play on your movie.', null, stopLive);
   } else if (t === 'ln') { liveOut = null; hideX(); banner('Your partner declined the live stream.'); }
   else if (t === 'ls') hideLive();
@@ -324,7 +386,8 @@ function updateStart() {
   const ok = !!(conn && conn.open && v.src && partner && partner.name && v.paused && !counting);
   const b = $('#start'); b.disabled = !ok;
   b.title = ok ? '' : 'Needs: partner connected, both movies chosen, and playback paused';
-  $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn);
+  $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn && relayed !== true);
+  $('#sendfile').title = $('#golive').title = relayed === true ? 'Off: your connection goes through a relay, which uses limited data' : 'Share your movie with your partner';
 }
 ['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
 function refreshPresence() {
