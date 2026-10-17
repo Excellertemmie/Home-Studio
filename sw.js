@@ -1,5 +1,5 @@
-const V = 'home-studio-v2';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg'];
+const V = 'home-studio-v3';
+const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
 const PEERJS = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
 
 self.addEventListener('install', e => {
