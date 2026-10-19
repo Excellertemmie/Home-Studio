@@ -19,7 +19,7 @@ const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
 let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false,
-    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null;
+    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null, nudged = false;
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
@@ -72,7 +72,7 @@ function setup(c) {
   c.on('iceStateChanged', s => {
     if (s === 'failed' && !c.open) { status('Cannot reach partner', 'wait'); banner('Direct connection failed. Switch one of you between Wi-Fi and mobile data, or add a relay (TURN) server in app.js.'); }
   });
-  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); everConn = true; pAway = false; lastSeen = Date.now(); refreshPresence(); hello(); setTimeout(checkRoute, 2500); });
+  c.on('open', () => { clearTimeout(slow); clearTimeout(retry); banner(''); status('Connected', 'ok'); fold(true); everConn = true; pAway = false; lastSeen = Date.now(); refreshPresence(); nudged = false; hello(); setTimeout(checkRoute, 2500); });
   c.on('data', onData);
   const gone = () => {
     if (conn !== c || left) return;
@@ -102,7 +102,10 @@ function onData(m) {
   if (MEDIA.includes(t) && (!v.src || liveIn)) return;
   if (SHARE.includes(t)) return shareMsg(m);
   if (t === 'ping') setAway(m.a);
-  else if (t === 'hello') { partner = m; info(); updateStart(); }
+  else if (t === 'hello') {
+    partner = m; info(); updateStart();
+    if (!m.name && v.src && !nudged) { nudged = true; send({ t: 'nd', name: fileName }); }
+  }
   else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
   else if (t === 'pause') apply(() => { v.pause(); v.currentTime = tgt; });
   else if (t === 'seek') apply(() => { v.currentTime = tgt; });
@@ -145,13 +148,21 @@ v.onloadedmetadata = () => {
   let s = 0; try { s = +localStorage.getItem(key); } catch (e) {}
   if (s > 5 && s < v.duration - 10) apply(() => { v.currentTime = s; });
   hello(); info();
+  if (partner && !partner.name && conn && conn.open) send({ t: 'nd', name: fileName });
 };
 v.onerror = () => { if (v.src) banner("This browser can't play that file. Try an .mp4 (H.264/AAC) copy. .mkv often won't play."); };
 setInterval(() => { if (key && !v.paused) try { localStorage.setItem(key, v.currentTime); } catch (e) {} }, 5000);
 function info() {
-  const el = $('#fileinfo'); el.className = '';
+  const el = $('#fileinfo'); el.className = ''; $('#nudge').hidden = $('#need').hidden = true;
   if (!conn || !conn.open) { el.textContent = v.src ? 'Loaded: ' + fileName : ''; return; }
-  if (!partner || !partner.name) { el.textContent = "Waiting for your partner to choose their movie file."; return; }
+  if (partner && partner.name && !v.src) {
+    el.className = 'warn'; $('#need').hidden = false;
+    el.textContent = 'Your partner has "' + partner.name + '" ready. Have the same movie? Choose it to watch together. If not, ask them to share it.';
+    return;
+  }
+  if (!partner || !partner.name) {
+    el.textContent = 'Waiting for your partner to choose their movie file.'; $('#nudge').hidden = !v.src; return;
+  }
   if (v.duration && partner.dur && Math.abs(v.duration - partner.dur) > 1.5) {
     el.className = 'warn';
     el.textContent = 'Your files differ in length by ' + Math.abs(v.duration - partner.dur).toFixed(1) + 's. They may be different cuts. Use Offset to line them up.';
@@ -211,6 +222,8 @@ document.addEventListener('click', e => document.querySelectorAll('details.menu[
 ['#sendfile', '#golive', '#resync'].forEach(s => $(s).addEventListener('click', closeMenus));
 // Theatre mode dims everything except the movie
 $('#theatre').onclick = () => document.body.classList.toggle('theatre');
+$('#nudge').onclick = () => { send({ t: 'nd', name: fileName }); banner('Told your partner you are ready.'); };
+$('#need').onclick = () => { send({ t: 'nn' }); banner('Asked your partner to share the movie.'); };
 // New chat messages appear over the picture in fullscreen
 let tt;
 function toast(x) { const t = $('#toast'); t.textContent = x; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 4500); }
@@ -240,7 +253,7 @@ $('#chatf').onsubmit = e => {
 };
 
 /* ---------- share my movie: send the file, or live stream ---------- */
-const SHARE = ['xo', 'xg', 'xn', 'xc', 'xe', 'xx', 'lo', 'lg', 'ln', 'ls', 'lx'];
+const SHARE = ['xo', 'xg', 'xn', 'xc', 'xe', 'xx', 'lo', 'lg', 'ln', 'ls', 'lx', 'nd', 'nn'];
 const mb = n => (n / 1e6).toFixed(0) + ' MB';
 function showX(txt, pct, cancel) {
   $('#xfer').hidden = false; $('#xtxt').textContent = txt; cancelFn = cancel;
@@ -283,9 +296,9 @@ function guardLive() {
     }
   }, 4000);
 }
-function ask(q) {
+function ask(q, y = 'Accept', n = 'Decline') {
   return new Promise(res => {
-    const d = $('#dlg'); $('#dq').textContent = q;
+    const d = $('#dlg'); $('#dq').textContent = q; $('#dyes').textContent = y; $('#dno').textContent = n;
     const done = ok => { d.close(); res(ok); };
     $('#dyes').onclick = () => done(true); $('#dno').onclick = () => done(false);
     d.oncancel = () => res(false); d.showModal();
@@ -336,7 +349,17 @@ function stopWatch() { send({ t: 'lx' }); hideLive(); }
 
 async function shareMsg(m) {
   const t = m.t;
-  if (t === 'xo') {
+  if (t === 'nd') {
+    // Partner is ready with a movie: ask whether you have the same one
+    if (v.src) return;
+    if (await ask('Your partner is ready to watch "' + m.name + '". Do you have the same movie?', 'Choose my copy', "I don't have it")) $('#file').click();
+    else send({ t: 'nn' });
+  } else if (t === 'nn') {
+    banner(relayed === true
+      ? "Your partner doesn't have the movie, and your connection goes through a relay, which can't carry a whole movie. Send the file another way, for example Google Drive or Telegram."
+      : "Your partner doesn't have the movie. Open Share movie to send it or stream it.");
+    if (relayed !== true) { const mm = document.querySelector('details.menu'); if (mm) mm.open = true; }
+  } else if (t === 'xo') {
     if (relayed === true) send({ t: 'xn' });
     else if (await ask('Your partner wants to send you "' + m.name + '" (' + mb(m.size) + '). Accept?')) {
       recv = { name: m.name, size: m.size, type: m.type, got: 0, parts: [], last: -1 };
@@ -382,6 +405,10 @@ function updateStart() {
   b.title = ok ? '' : 'Needs: partner connected, both movies chosen, and playback paused';
   $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn && relayed !== true);
   $('#sendfile').title = $('#golive').title = relayed === true ? 'Off: your connection goes through a relay, which uses limited data' : 'Share your movie with your partner';
+  $('#whyshare').textContent = !(conn && conn.open) ? 'Connect with your partner first.'
+    : !v.src ? 'Choose your movie first.'
+    : relayed === true ? "Off: your connection goes through a relay, which can't carry a whole movie. Try both on Wi-Fi, or send the file another way (Google Drive, Telegram)."
+    : (sending || recv || liveOut || liveIn) ? 'A share is already in progress.' : '';
 }
 ['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
 function refreshPresence() {
