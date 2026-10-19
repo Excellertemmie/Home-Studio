@@ -3,13 +3,7 @@
 // For strict networks add a TURN server: PEER_OPTS = {config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'turn:YOUR_TURN',username:'u',credential:'p'}]}}
 // Relay (TURN) for people on different networks/states. Sign up free at metered.ca, then paste your TURN entries here, e.g.
 // const TURN = [{urls:'turn:relay.metered.ca:80',username:'YOUR_USER',credential:'YOUR_PASS'},{urls:'turn:relay.metered.ca:443?transport=tcp',username:'YOUR_USER',credential:'YOUR_PASS'}];
-const TURN = [
-  { urls: 'stun:stun.relay.metered.ca:80' },
-  { urls: 'turn:global.relay.metered.ca:80', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
-  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
-  { urls: 'turn:global.relay.metered.ca:443', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' },
-  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'f7b4673fb38fefb4b1158a44', credential: 'UpbpZmtI0XPyi2Pd' }
-];
+const TURN = [];
 // Short-lived credentials come from /api/turn (see api/turn.js). TURN above is only the fallback.
 let ICE = null;
 async function peerOpts() {
