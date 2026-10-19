@@ -4,6 +4,9 @@
 // Relay (TURN) for people on different networks/states. Sign up free at metered.ca, then paste your TURN entries here, e.g.
 // const TURN = [{urls:'turn:relay.metered.ca:80',username:'YOUR_USER',credential:'YOUR_PASS'},{urls:'turn:relay.metered.ca:443?transport=tcp',username:'YOUR_USER',credential:'YOUR_PASS'}];
 const TURN = [];
+// Relay allowance for sharing a movie when you can't connect directly. Per device, per day.
+// It is a soft limit (it lives in the browser). Lower it before sharing widely.
+const RELAY_DAILY_MB = 50;
 // Short-lived credentials come from /api/turn (see api/turn.js). TURN above is only the fallback.
 let ICE = null;
 async function peerOpts() {
@@ -265,21 +268,42 @@ $('#xcancel').onclick = () => cancelFn && cancelFn();
 // Is this connection going through the relay (uses limited data) or directly between you?
 async function routeOf(pc) {
   try {
-    const st = await pc.getStats(); let pair; const c = {};
-    st.forEach(r => {
-      if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || r.selected)) pair = r;
-      if (/candidate$/.test(r.type)) c[r.id] = r;
-    });
-    if (!pair) return null;
-    const l = c[pair.localCandidateId], q = c[pair.remoteCandidateId];
+    const st = await pc.getStats(), by = {}; let sel = null;
+    st.forEach(r => { by[r.id] = r; });
+    st.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) sel = by[r.selectedCandidatePairId] || sel; });
+    if (!sel) st.forEach(r => { if (!sel && r.type === 'candidate-pair' && r.selected) sel = r; });
+    if (!sel) st.forEach(r => { if (!sel && r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) sel = r; });
+    if (!sel) return null;
+    const l = by[sel.localCandidateId], q = by[sel.remoteCandidateId];
     return !!((l && l.candidateType === 'relay') || (q && q.candidateType === 'relay'));
   } catch (e) { return null; }
+}
+// Sharing is blocked on a relay unless both of you chose to allow it
+const dayKey = () => new Date().toISOString().slice(0, 10);
+function usedMB() { try { const o = JSON.parse(localStorage.getItem('hs:relay')) || {}; return o.d === dayKey() ? o.mb : 0; } catch (e) { return 0; } }
+function addMB(x) { try { localStorage.setItem('hs:relay', JSON.stringify({ d: dayKey(), mb: usedMB() + x })); } catch (e) {} }
+const leftMB = () => Math.max(0, RELAY_DAILY_MB - usedMB());
+// On a relay, sharing is allowed only while today's allowance lasts
+const blocked = () => relayed === true && leftMB() <= 0;
+let liveTimer;
+function meterLive() {
+  clearInterval(liveTimer); let last = 0;
+  liveTimer = setInterval(async () => {
+    const pc = liveCall && liveCall.peerConnection;
+    if (!pc || !liveOut) return clearInterval(liveTimer);
+    let bytes = 0; (await pc.getStats()).forEach(r => { if (r.type === 'outbound-rtp') bytes += r.bytesSent || 0; });
+    const d = bytes - last; last = bytes;
+    if (await routeOf(pc) === true) {
+      addMB(d / 1e6); updateStart();
+      if (leftMB() <= 0) { stopLive(); banner('Your relay allowance for today is used up, so the live stream stopped. It has no limit on a direct connection.'); }
+    }
+  }, 3000);
 }
 async function checkRoute() {
   if (!conn || !conn.open || !conn.peerConnection) return;
   const r = await routeOf(conn.peerConnection); if (r === null) return;
   relayed = r; status('Connected · ' + (r ? 'via relay' : 'direct'), 'ok');
-  if (r && (sending || recv || liveOut || liveIn)) {
+  if (r && blocked() && (sending || recv || liveOut || liveIn)) {
     if (sending) cancelSend(); else if (recv) { send({ t: 'xx' }); recv = null; hideX(); }
     else if (liveOut) stopLive(); else stopWatch();
     banner('Movie sharing stopped: your connection goes through a relay, which uses limited data.');
@@ -290,7 +314,7 @@ function guardLive() {
   setTimeout(async () => {
     const pc = liveCall && liveCall.peerConnection;
     if (!pc || !(liveOut || liveIn)) return;
-    if (await routeOf(pc) === true) {
+    if (await routeOf(pc) === true && blocked()) {
       if (liveOut) stopLive(); else stopWatch();
       banner('Live stream stopped: it was going through a relay, which uses limited data.');
     }
@@ -309,6 +333,8 @@ const cancelSend = () => { send({ t: 'xx' }); sending = null; hideX(); };
 // Option A: send the movie file straight to your partner's device
 $('#sendfile').onclick = () => {
   if (!curFile) return;
+  if (relayed === true && curFile.size / 1e6 > leftMB())
+    return banner('This movie is ' + mb(curFile.size) + ', but your relay allowance today is ' + Math.round(leftMB()) + ' MB. Sharing it needs a direct connection (both on Wi-Fi), or send the file another way, for example Google Drive or Telegram.');
   send({ t: 'xo', name: curFile.name, size: curFile.size, type: curFile.type });
   sending = { off: 0, last: -1 }; showX('Waiting for your partner to accept…', null, cancelSend);
 };
@@ -321,6 +347,10 @@ async function pump() {
     const buf = await f.slice(s.off, s.off + 65536).arrayBuffer();
     if (sending !== s) return;
     conn.send({ t: 'xc', d: buf }); s.off += buf.byteLength;
+    if (relayed === true) {
+      s.rb = (s.rb || 0) + buf.byteLength;
+      if (s.rb >= 1e6) { addMB(s.rb / 1e6); s.rb = 0; if (leftMB() <= 0) { cancelSend(); banner('Your relay allowance for today is used up, so the transfer stopped.'); return; } }
+    }
     const p = Math.floor(s.off / f.size * 100);
     if (p !== s.last) { s.last = p; showX('Sending ' + f.name + ' ' + p + '%', p, cancelSend); }
   }
@@ -329,6 +359,7 @@ async function pump() {
 
 // Option B: stream the movie live while it plays on your screen
 $('#golive').onclick = () => {
+  if (relayed === true && leftMB() < 5) return banner('Not enough relay allowance left today for a live stream. It works without limits on a direct connection.');
   const s = v.captureStream ? v.captureStream() : v.mozCaptureStream ? v.mozCaptureStream() : null;
   if (!s) return banner("This browser can't live stream. Try Chrome on a laptop or Android, or use Send my movie.");
   liveOut = s; send({ t: 'lo' }); showX('Waiting for your partner to accept the live stream…', null, stopLive);
@@ -355,12 +386,12 @@ async function shareMsg(m) {
     if (await ask('Your partner is ready to watch "' + m.name + '". Do you have the same movie?', 'Choose my copy', "I don't have it")) $('#file').click();
     else send({ t: 'nn' });
   } else if (t === 'nn') {
-    banner(relayed === true
+    banner(blocked()
       ? "Your partner doesn't have the movie, and your connection goes through a relay, which can't carry a whole movie. Send the file another way, for example Google Drive or Telegram."
       : "Your partner doesn't have the movie. Open Share movie to send it or stream it.");
-    if (relayed !== true) { const mm = document.querySelector('details.menu'); if (mm) mm.open = true; }
+    if (!blocked()) { const mm = document.querySelector('details.menu'); if (mm) mm.open = true; }
   } else if (t === 'xo') {
-    if (relayed === true) send({ t: 'xn' });
+    if (blocked()) send({ t: 'xn' });
     else if (await ask('Your partner wants to send you "' + m.name + '" (' + mb(m.size) + '). Accept?')) {
       recv = { name: m.name, size: m.size, type: m.type, got: 0, parts: [], last: -1 };
       send({ t: 'xg' }); showX('Receiving ' + m.name + '…', 0, () => { send({ t: 'xx' }); recv = null; hideX(); });
@@ -377,9 +408,9 @@ async function shareMsg(m) {
     recv = null; hideX(); loadFile(f, false);
     banner(ok ? 'Movie received. You can now watch together.' : 'The file may be incomplete. Ask your partner to send it again.');
   } else if (t === 'xx') { sending = recv = null; hideX(); banner('The transfer was cancelled.'); }
-  else if (t === 'lo') send({ t: relayed !== true && await ask('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
+  else if (t === 'lo') send({ t: !blocked() && await ask('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
   else if (t === 'lg' && liveOut) {
-    liveCall = peer.call(conn.peer, liveOut); guardLive();
+    liveCall = peer.call(conn.peer, liveOut); guardLive(); meterLive();
     showX('Live streaming to your partner. Press play on your movie.', null, stopLive);
   } else if (t === 'ln') { liveOut = null; hideX(); banner('Your partner declined the live stream.'); }
   else if (t === 'ls') hideLive();
@@ -403,12 +434,13 @@ function updateStart() {
   const ok = !!(conn && conn.open && v.src && partner && partner.name && v.paused && !counting);
   const b = $('#start'); b.disabled = !ok;
   b.title = ok ? '' : 'Needs: partner connected, both movies chosen, and playback paused';
-  $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn && relayed !== true);
-  $('#sendfile').title = $('#golive').title = relayed === true ? 'Off: your connection goes through a relay, which uses limited data' : 'Share your movie with your partner';
+  $('#sendfile').disabled = $('#golive').disabled = !(conn && conn.open && v.src && !sending && !recv && !liveOut && !liveIn && !blocked());
+  $('#sendfile').title = $('#golive').title = blocked() ? 'Off: your connection goes through a relay, which uses limited data' : 'Share your movie with your partner';
   $('#whyshare').textContent = !(conn && conn.open) ? 'Connect with your partner first.'
     : !v.src ? 'Choose your movie first.'
-    : relayed === true ? "Off: your connection goes through a relay, which can't carry a whole movie. Try both on Wi-Fi, or send the file another way (Google Drive, Telegram)."
-    : (sending || recv || liveOut || liveIn) ? 'A share is already in progress.' : '';
+    : blocked() ? "Off: your connection goes through a relay, which can't carry a whole movie. Try both on Wi-Fi, or send the file another way (Google Drive, Telegram)."
+    : (sending || recv || liveOut || liveIn) ? 'A share is already in progress.'
+    : relayed === true ? 'On the relay. Allowance today: ' + Math.round(leftMB()) + ' MB left of ' + RELAY_DAILY_MB + ' MB. Bigger movies need a direct connection (both on Wi-Fi).' : '';
 }
 ['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
 function refreshPresence() {
