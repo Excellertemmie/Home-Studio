@@ -6,7 +6,7 @@
 const TURN = [];
 // Relay allowance for sharing a movie when you can't connect directly. Per device, per day.
 // It is a soft limit (it lives in the browser). Lower it before sharing widely.
-const RELAY_DAILY_MB = 0;
+const RELAY_DAILY_MB = 50;
 // Short-lived credentials come from /api/turn (see api/turn.js). TURN above is only the fallback.
 let ICE = null;
 async function peerOpts() {
@@ -22,7 +22,7 @@ const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
 let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false,
-    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null, nudged = false;
+    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null, nudged = false, guestTok = '';
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
@@ -30,20 +30,35 @@ const note = (d, t) => { $('#log').textContent = 'Last sync message: ' + d + ' '
 const send = o => { if (conn && conn.open) { conn.send(o); if (o.t !== 'beat' && o.t !== 'ping') note('sent', o.t); } };
 const pos = () => v.currentTime - off;
 const status = (t, s) => { $('#status span').textContent = t; $('#status').dataset.s = s || ''; };
-const banner = t => { const b = $('#banner'); b.textContent = t || ''; b.hidden = !t; };
+let bannerT;
+const banner = (t, sticky) => {
+  const b = $('#banner'); b.textContent = t || ''; b.hidden = !t; clearTimeout(bannerT);
+  if (t && !sticky) bannerT = setTimeout(() => { if (b.textContent === t) { b.textContent = ''; b.hidden = true; } }, 10000);
+};
 const apply = f => { lock = true; try { f(); } catch (e) {} clearTimeout(lt); lt = setTimeout(() => lock = false, 600); };
 const play = () => v.play().catch(() => { $('#tap').hidden = false; });
 $('#tap').onclick = () => { $('#tap').hidden = true; v.play(); };
 
 /* ---------- connection ---------- */
-function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; $('#mini').textContent = code; fold(false);
+function showRoom() { $('#lobby').hidden = true; $('#room').hidden = false; $('#code').textContent = code; $('#mini').textContent = code; $('#unlock').hidden = !host; fold(false);
   try { localStorage.setItem('hs:room', JSON.stringify({ code, host, at: Date.now() })); } catch (e) {} }
 function fold(closed) { $('#room').classList.toggle('closed', closed); $('#roomtoggle').setAttribute('aria-expanded', String(!closed)); }
 async function create(saved) {
   code = saved || Array.from({ length: 6 }, () => AL[Math.random() * AL.length | 0]).join('');
   host = true; left = false;
+  try { guestTok = saved ? localStorage.getItem('hs:guest:' + code) || '' : ''; } catch (e) { guestTok = ''; }
   peer = new Peer(PRE + code, await peerOpts()); bindPeer();
-  peer.on('connection', c => { if (conn && conn.open) try { conn.close(); } catch (e) {} setup(c); });
+  peer.on('connection', c => {
+    const tok = c.metadata && c.metadata.tok;
+    if (guestTok && tok !== guestTok) {
+      // The seat is taken: tell the stranger and hang up. Your partner is not disturbed.
+      c.on('open', () => { c.send({ t: 'full' }); setTimeout(() => { try { c.close(); } catch (e) {} }, 400); });
+      return;
+    }
+    if (!guestTok && tok) { guestTok = tok; try { localStorage.setItem('hs:guest:' + code, tok); } catch (e) {} }
+    if (conn && conn.open) try { conn.close(); } catch (e) {}
+    setup(c);
+  });
 }
 async function join(c) {
   code = c.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -52,20 +67,29 @@ async function join(c) {
   peer = new Peer(await peerOpts()); bindPeer(); peer.on('open', dial);
 }
 function bindPeer() {
-  peer.on('open', () => { if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
+  peer.on('open', () => { banner(''); if (host) { showRoom(); status('Room ready. Waiting for your partner.', 'wait'); } });
   peer.on('disconnected', () => { if (!left) peer.reconnect(); });
-  peer.on('call', c => { c.answer(); liveCall = c; c.on('stream', showLive); c.on('close', hideLive); });
+  peer.on('call', c => { if (!conn || !conn.open || c.peer !== conn.peer) return c.close(); c.answer(); liveCall = c; c.on('stream', showLive); c.on('close', hideLive); });
   peer.on('error', e => {
     if (e.type === 'unavailable-id' && host) {
       peer.destroy();
       if (rejoinCode && ++tries < 6) return setTimeout(() => create(rejoinCode), 3000);
       rejoinCode = ''; return create();
     }
-    if (e.type === 'peer-unavailable') { banner('Room not found yet. Retrying…'); return schedule(); }
-    banner('Connection problem (' + e.type + '). Retrying…'); schedule();
+    if (e.type === 'peer-unavailable') { banner('Room not found yet. Retrying…', true); return schedule(); }
+    banner('Connection problem (' + e.type + '). Retrying…', true); schedule();
+    setTimeout(() => { if (peer && !peer.destroyed && peer.disconnected && !left) peer.reconnect(); }, 3000);
   });
 }
-function dial() { if (left || host || (conn && conn.open) || !peer || peer.destroyed) return; setup(peer.connect(PRE + code, { reliable: true })); }
+function tokFor(c) {
+  let t = '';
+  try {
+    t = localStorage.getItem('hs:tok:' + c) || '';
+    if (!t) { t = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('hs:tok:' + c, t); }
+  } catch (e) { t = t || String(Math.random()).slice(2); }
+  return t;
+}
+function dial() { if (left || host || (conn && conn.open) || !peer || peer.destroyed) return; setup(peer.connect(PRE + code, { reliable: true, metadata: { tok: tokFor(code) } })); }
 function schedule() { clearTimeout(retry); if (!host && !left) retry = setTimeout(dial, 3000); }
 function setup(c) {
   conn = c;
@@ -80,8 +104,8 @@ function setup(c) {
   const gone = () => {
     if (conn !== c || left) return;
     status(host ? 'Partner left. Waiting for them to rejoin.' : 'Disconnected. Reconnecting…', 'wait');
-    banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…');
-    sending = recv = liveOut = null; relayed = null; if (liveIn) hideLive(); hideX();
+    banner(host ? 'Your partner disconnected. They can rejoin with the same code.' : 'Connection lost. Trying to rejoin…', true);
+    closeAsk(); sending = recv = liveOut = null; relayed = null; if (liveIn) hideLive(); hideX();
     partner = null; info(); fold(false); refreshPresence(); schedule();
   };
   c.on('close', gone); c.on('error', gone);
@@ -89,7 +113,7 @@ function setup(c) {
 function leave() {
   left = true; clearTimeout(retry);
   try { conn && conn.close(); peer && peer.destroy(); } catch (e) {}
-  try { localStorage.removeItem('hs:room'); } catch (e) {}
+  try { localStorage.removeItem('hs:room'); localStorage.removeItem('hs:guest:' + code); localStorage.removeItem('hs:tok:' + code); } catch (e) {}
   conn = peer = null; partner = null; code = ''; everConn = false; pAway = false; refreshPresence(); history.replaceState(null, '', location.pathname);
   $('#room').hidden = true; $('#lobby').hidden = false; banner(''); status('Not connected'); info();
 }
@@ -101,6 +125,7 @@ const MEDIA = ['play', 'pause', 'seek', 'beat', 'wait', 'ready', 'req'];
 function onData(m) {
   const t = m.t, tgt = (m.p || 0) + off;
   lastSeen = Date.now();
+  if (t === 'full') { leave(); banner(m.why === 'removed' ? 'The host removed you from the room.' : 'This room already has two people.'); return; }
   if (t !== 'beat' && t !== 'ping' && t !== 'xc') note('received', t);
   if (MEDIA.includes(t) && (!v.src || liveIn)) return;
   if (SHARE.includes(t)) return shareMsg(m);
@@ -139,6 +164,7 @@ setInterval(() => { if (host && v.src && !selfWait) send(beat(false)); }, 2000);
 /* ---------- file, subtitles, info ---------- */
 $('#file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0], true); };
 function loadFile(f, prime) {
+  closeAsk();
   curFile = f; fileName = f.name; key = 'hs:' + f.name + f.size;
   v.src = URL.createObjectURL(f); $('#empty').hidden = true; banner('');
   // Brief muted play/pause during this tap so phones allow your partner's play command later
@@ -233,6 +259,12 @@ function toast(x) { const t = $('#toast'); t.textContent = x; t.hidden = false; 
 setInterval(() => { if (conn && conn.open) checkRoute(); }, 15000);
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
+$('#unlock').onclick = async () => {
+  if (!(await ask('Remove your partner from this room? Anyone with the code could then join.', 'Remove', 'Cancel'))) return;
+  send({ t: 'full', why: 'removed' });
+  guestTok = ''; try { localStorage.removeItem('hs:guest:' + code); } catch (e) {}
+  setTimeout(() => { try { conn && conn.close(); } catch (e) {} }, 300);
+};
 $('#roomtoggle').onclick = () => fold(!$('#room').classList.contains('closed'));
 let unread = 0;
 function foldChat(c) {
@@ -320,14 +352,18 @@ function guardLive() {
     }
   }, 4000);
 }
+let askRes = null;
 function ask(q, y = 'Accept', n = 'Decline') {
   return new Promise(res => {
+    closeAsk(); askRes = res;
     const d = $('#dlg'); $('#dq').textContent = q; $('#dyes').textContent = y; $('#dno').textContent = n;
-    const done = ok => { d.close(); res(ok); };
+    const done = ok => { d.close(); askRes = null; res(ok); };
     $('#dyes').onclick = () => done(true); $('#dno').onclick = () => done(false);
-    d.oncancel = () => res(false); d.showModal();
+    d.oncancel = () => { askRes = null; res(false); }; d.showModal();
   });
 }
+// Close any open question when things change (partner left, you chose a movie, the offer was withdrawn)
+function closeAsk() { const d = $('#dlg'); if (d.open) d.close(); if (askRes) { const r = askRes; askRes = null; r(null); } }
 const cancelSend = () => { send({ t: 'xx' }); sending = null; hideX(); };
 
 // Option A: send the movie file straight to your partner's device
@@ -383,8 +419,8 @@ async function shareMsg(m) {
   if (t === 'nd') {
     // Partner is ready with a movie: ask whether you have the same one
     if (v.src) return;
-    if (await ask('Your partner is ready to watch "' + m.name + '". Do you have the same movie?', 'Choose my copy', "I don't have it")) $('#file').click();
-    else send({ t: 'nn' });
+    const r = await ask('Your partner is ready to watch "' + m.name + '". Do you have the same movie?', 'Choose my copy', "I don't have it");
+    if (r === true) $('#file').click(); else if (r === false) send({ t: 'nn' });
   } else if (t === 'nn') {
     banner(blocked()
       ? "Your partner doesn't have the movie, and your connection goes through a relay, which can't carry a whole movie. Send the file another way, for example Google Drive or Telegram."
@@ -407,13 +443,13 @@ async function shareMsg(m) {
     const f = new File(recv.parts, recv.name, { type: recv.type || 'video/mp4' }), ok = f.size === recv.size;
     recv = null; hideX(); loadFile(f, false);
     banner(ok ? 'Movie received. You can now watch together.' : 'The file may be incomplete. Ask your partner to send it again.');
-  } else if (t === 'xx') { sending = recv = null; hideX(); banner('The transfer was cancelled.'); }
+  } else if (t === 'xx') { closeAsk(); sending = recv = null; hideX(); banner('The transfer was cancelled.'); }
   else if (t === 'lo') send({ t: !blocked() && await ask('Your partner wants to live stream their movie to you. Watch?') ? 'lg' : 'ln' });
   else if (t === 'lg' && liveOut) {
     liveCall = peer.call(conn.peer, liveOut); guardLive(); meterLive();
     showX('Live streaming to your partner. Press play on your movie.', null, stopLive);
   } else if (t === 'ln') { liveOut = null; hideX(); banner('Your partner declined the live stream.'); }
-  else if (t === 'ls') hideLive();
+  else if (t === 'ls') { closeAsk(); hideLive(); }
   else if (t === 'lx') { try { liveCall && liveCall.close(); } catch (e) {} liveCall = liveOut = null; hideX(); banner('Your partner stopped watching.'); }
 }
 
