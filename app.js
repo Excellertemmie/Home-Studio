@@ -6,7 +6,7 @@
 const TURN = [];
 // Relay allowance for sharing a movie when you can't connect directly. Per device, per day.
 // It is a soft limit (it lives in the browser). Lower it before sharing widely.
-const RELAY_DAILY_MB = 50;
+const RELAY_DAILY_MB = 0;
 // Short-lived credentials come from /api/turn (see api/turn.js). TURN above is only the fallback.
 let ICE = null;
 async function peerOpts() {
