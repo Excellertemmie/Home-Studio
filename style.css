@@ -43,6 +43,10 @@ video{width:100%;height:100%;display:block;background:#000}
 #xtxt{flex:1;font-size:14px;overflow-wrap:anywhere}
 #xbar{width:140px;accent-color:var(--red)}
 #nudge,#need{margin-top:8px;align-self:flex-start}
+.next{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:12px;padding:14px 16px;background:linear-gradient(135deg,#2a1410,#14212a);border:1px solid var(--line);border-radius:var(--r)}
+.next b{display:block;font:600 17px "Iowan Old Style",Palatino,Georgia,serif}
+.next p{color:var(--mut);margin:2px 0 0;font-size:14px}
+.nact{display:flex;gap:8px;flex-wrap:wrap}
 #nudge[hidden],#need[hidden]{display:none}
 #whyshare{font-size:12px;line-height:1.4;color:var(--gold);margin:0}
 #whyshare:empty{display:none}
@@ -105,6 +109,6 @@ body.theatre{background:#050302}
   .stage,aside{display:contents}
   #lobby{order:0}
   .screen{order:1;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
-  #banner{order:2}#room{order:3}.bar{order:4}#xfer{order:5}#fileinfo{order:6}#nudge,#need{order:6}#log{order:7}.chat{order:8}
+  #next{order:2}#banner{order:2}#room{order:3}.bar{order:4}#xfer{order:5}#fileinfo{order:6}#nudge,#need{order:6}#log{order:7}.chat{order:8}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
