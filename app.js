@@ -22,7 +22,7 @@ const $ = s => document.querySelector(s), v = $('#video');
 const PRE = 'homestudio-', AL = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let peer, conn, host = false, code = '', off = 0, lock = false, lt, selfWait = false, resume = false;
 let key = '', fileName = '', partner = null, retry, left = false, rejoinCode = '', tries = 0, lastSeen = 0, pAway = false, everConn = false, counting = false,
-    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null, nudged = false, guestTok = '';
+    curFile = null, sending = null, recv = null, liveOut = null, liveCall = null, liveIn = false, cancelFn = null, relayed = null, nudged = false, guestTok = '', started = false;
 
 let priming = false, reqT;
 const quiet = () => lock || priming || document.hidden;
@@ -132,7 +132,6 @@ function onData(m) {
   if (t === 'ping') setAway(m.a);
   else if (t === 'hello') {
     partner = m; info(); updateStart();
-    if (!m.name && v.src && !nudged) { nudged = true; send({ t: 'nd', name: fileName }); }
   }
   else if (t === 'play') apply(() => { if (Math.abs(v.currentTime - tgt) > .5) v.currentTime = tgt; play(); });
   else if (t === 'pause') apply(() => { v.pause(); v.currentTime = tgt; });
@@ -164,7 +163,7 @@ setInterval(() => { if (host && v.src && !selfWait) send(beat(false)); }, 2000);
 /* ---------- file, subtitles, info ---------- */
 $('#file').onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0], true); };
 function loadFile(f, prime) {
-  closeAsk();
+  closeAsk(); started = false;
   curFile = f; fileName = f.name; key = 'hs:' + f.name + f.size;
   v.src = URL.createObjectURL(f); $('#empty').hidden = true; banner('');
   // Brief muted play/pause during this tap so phones allow your partner's play command later
@@ -177,26 +176,10 @@ v.onloadedmetadata = () => {
   let s = 0; try { s = +localStorage.getItem(key); } catch (e) {}
   if (s > 5 && s < v.duration - 10) apply(() => { v.currentTime = s; });
   hello(); info();
-  if (partner && !partner.name && conn && conn.open) send({ t: 'nd', name: fileName });
 };
 v.onerror = () => { if (v.src) banner("This browser can't play that file. Try an .mp4 (H.264/AAC) copy. .mkv often won't play."); };
 setInterval(() => { if (key && !v.paused) try { localStorage.setItem(key, v.currentTime); } catch (e) {} }, 5000);
-function info() {
-  const el = $('#fileinfo'); el.className = ''; $('#nudge').hidden = $('#need').hidden = true;
-  if (!conn || !conn.open) { el.textContent = v.src ? 'Loaded: ' + fileName : ''; return; }
-  if (partner && partner.name && !v.src) {
-    el.className = 'warn'; $('#need').hidden = false;
-    el.textContent = 'Your partner has "' + partner.name + '" ready. Have the same movie? Choose it to watch together. If not, ask them to share it.';
-    return;
-  }
-  if (!partner || !partner.name) {
-    el.textContent = 'Waiting for your partner to choose their movie file.'; $('#nudge').hidden = !v.src; return;
-  }
-  if (v.duration && partner.dur && Math.abs(v.duration - partner.dur) > 1.5) {
-    el.className = 'warn';
-    el.textContent = 'Your files differ in length by ' + Math.abs(v.duration - partner.dur).toFixed(1) + 's. They may be different cuts. Use Offset to line them up.';
-  } else el.textContent = 'Both movies loaded. Partner has: ' + partner.name;
-}
+function info() { $('#fileinfo').textContent = ''; renderNext(); }
 $('#subs').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   let x = await f.text();
@@ -259,6 +242,7 @@ function toast(x) { const t = $('#toast'); t.textContent = x; t.hidden = false; 
 setInterval(() => { if (conn && conn.open) checkRoute(); }, 15000);
 $('#joinf').onsubmit = e => { e.preventDefault(); join($('#codein').value); };
 $('#leave').onclick = leave;
+$('#shareinv').onclick = shareInvite;
 $('#unlock').onclick = async () => {
   if (!(await ask('Remove your partner from this room? Anyone with the code could then join.', 'Remove', 'Cancel'))) return;
   send({ t: 'full', why: 'removed' });
@@ -465,6 +449,41 @@ function wake() {
   } else dial();
 }
 /* ---------- partner presence ---------- */
+// ---------- one clear next step for whoever is looking at the screen ----------
+let nextA = null, nextB = null;
+v.addEventListener('playing', () => { started = true; renderNext(); });
+$('#na').onclick = () => nextA && nextA();
+$('#nb').onclick = () => nextB && nextB();
+async function shareInvite() {
+  const url = location.origin + location.pathname + '#' + code;
+  try { if (navigator.share) { await navigator.share({ title: 'Home Studio', text: 'Watch a movie together with me on Home Studio', url }); return; } }
+  catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); banner('Invite link copied. Paste it in WhatsApp or any chat.'); }
+  catch (e) { banner('Copy this link: ' + url, true); }
+}
+function renderNext() {
+  const up = !!(conn && conn.open), has = !!(partner && partner.name); let s = null;
+  if (!code || sending || recv || liveOut || liveIn || counting) s = null;
+  else if (!up) s = host
+    ? { t: 'Invite your partner', x: 'Send them the invite link. They join with one tap.', a: 'Share invite', fa: shareInvite }
+    : { t: 'Connecting…', x: 'Joining the room. This can take a few seconds.' };
+  else if (!v.src && has) s = { t: 'Choose the same movie', x: 'Your partner has "' + partner.name + '". Pick your copy of it.', a: 'Choose movie', fa: () => $('#file').click(),
+    b: "I don't have it", fb: () => { send({ t: 'nn' }); banner('Asked your partner to share it.'); } };
+  else if (!v.src) s = { t: 'Choose your movie', x: 'Pick the movie file. Your partner will see when you are ready.', a: 'Choose movie', fa: () => $('#file').click() };
+  else if (!has) s = { t: "Waiting for your partner's movie", x: 'They can pick their own copy, or you can send yours.', a: 'Send my movie',
+    fa: () => { if ($('#sendfile').disabled) banner($('#whyshare').textContent || 'Sharing is not available right now.'); else document.querySelector('details.menu').open = true; } };
+  else if (!started && v.paused) {
+    const diff = v.duration && partner.dur ? Math.abs(v.duration - partner.dur) : 0;
+    s = diff > 1.5
+      ? { t: 'Your movies may differ', x: 'The lengths differ by ' + diff.toFixed(1) + 's. Use Sync tools > Offset if they drift apart.', a: 'Start together', fa: () => $('#start').click() }
+      : { t: 'Ready to watch', x: 'Both movies are loaded.', a: 'Start together', fa: () => $('#start').click() };
+  }
+  const c = $('#next'); c.hidden = !s; if (!s) return;
+  $('#nt').textContent = s.t; $('#nx').textContent = s.x;
+  $('#na').hidden = !s.a; $('#na').textContent = s.a || ''; nextA = s.fa || null;
+  $('#nb').hidden = !s.b; $('#nb').textContent = s.b || ''; nextB = s.fb || null;
+}
+
 // Start together is active only when you are connected, both movies are chosen, and playback is paused
 function updateStart() {
   const ok = !!(conn && conn.open && v.src && partner && partner.name && v.paused && !counting);
@@ -477,6 +496,7 @@ function updateStart() {
     : blocked() ? "Off: your connection goes through a relay, which can't carry a whole movie. Try both on Wi-Fi, or send the file another way (Google Drive, Telegram)."
     : (sending || recv || liveOut || liveIn) ? 'A share is already in progress.'
     : relayed === true ? 'On the relay. Allowance today: ' + Math.round(leftMB()) + ' MB left of ' + RELAY_DAILY_MB + ' MB. Bigger movies need a direct connection (both on Wi-Fi).' : '';
+  renderNext();
 }
 ['play', 'pause', 'ended', 'loadedmetadata'].forEach(e => v.addEventListener(e, updateStart));
 function refreshPresence() {
